@@ -24,9 +24,11 @@
   const statusText = document.getElementById('status-text');
   const metaEl = document.getElementById('meta');
   const killBtn = document.getElementById('kill-btn');
+  const redrawBtn = document.getElementById('redraw-btn');
   const openViewerBtn = document.getElementById('open-viewer-btn');
   const tabListEl = document.getElementById('tab-list');
   const tabEmptyEl = document.getElementById('tab-empty');
+  const helpModal = document.getElementById('help-modal');
 
   // ──────────────────────────────────────────────────────────────────────
   // Helpers
@@ -172,6 +174,8 @@
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || ('HTTP ' + res.status));
+      // 新 PTY 上線 → busy set 變了，清 history cache 讓展開的歷史列表反映
+      historyCache.clear();
       await Promise.all([refreshProfiles(), refreshSessions()]);
       activate(json.id, json);
     } catch (err) {
@@ -429,7 +433,11 @@
     if (alsoDeleteServer) {
       fetch(API + '/api/sessions/' + encodeURIComponent(id), { method: 'DELETE' })
         .catch(() => {})
-        .finally(refreshAll);
+        .finally(() => {
+          // 殺 session 後 busy 狀態變了 — 清 history cache，讓已展開的歷史列表重抓 busy flag
+          historyCache.clear();
+          refreshAll();
+        });
     } else {
       refreshSessions();
     }
@@ -440,6 +448,7 @@
       statusText.textContent = '未選擇 session';
       metaEl.textContent = '';
       killBtn.style.display = 'none';
+      redrawBtn.style.display = 'none';
       return;
     }
     const s = pane.info;
@@ -450,6 +459,15 @@
     const ccTail = s.ccSessionId ? ` · cc:${s.ccSessionId.slice(0, 8)}` : '';
     metaEl.textContent = `${shorten(s.cwd, 50)} · ${s.cols}x${s.rows}${ccTail}`;
     killBtn.style.display = '';
+    redrawBtn.style.display = '';
+  }
+
+  function redrawActive() {
+    if (!activeId) return;
+    const pane = panes.get(activeId);
+    if (!pane || !pane.ws || pane.ws.readyState !== WebSocket.OPEN) return;
+    // \x0c = Form Feed = Ctrl+L，cc 收到會重繪 TUI / 清屏
+    pane.ws.send(JSON.stringify({ type: 'input', data: '\x0c' }));
   }
 
   // ──────────────────────────────────────────────────────────────────────
@@ -620,6 +638,14 @@
     if (!confirm('確定要殺掉這個 session？PTY 會結束，所有 attach 的 client（含其他視窗、wepages iframe）都會斷開。\n\n（只想關掉 tab 的話按上方 tab 的 × 即可，PTY 會保留）')) return;
     closePane(activeId, true);
   });
+  redrawBtn.addEventListener('click', redrawActive);
+
+  // Help modal
+  const openHelp = () => { helpModal.classList.add('visible'); };
+  const closeHelp = () => { helpModal.classList.remove('visible'); };
+  document.getElementById('help-btn').addEventListener('click', openHelp);
+  document.getElementById('help-close').addEventListener('click', closeHelp);
+  document.getElementById('help-redraw').addEventListener('click', () => { redrawActive(); closeHelp(); });
 
   openViewerBtn.addEventListener('click', async () => {
     try {
@@ -635,14 +661,33 @@
 
   // Modal 鍵盤 (ESC / Enter) — modal 開啟時優先處理
   document.addEventListener('keydown', (e) => {
-    const inModal = sm.modal.classList.contains('visible') || pm.modal.classList.contains('visible');
+    const inModal = sm.modal.classList.contains('visible') || pm.modal.classList.contains('visible') || helpModal.classList.contains('visible');
     if (!inModal) return;
     if (e.key === 'Escape') {
       if (sm.modal.classList.contains('visible')) smClose();
       if (pm.modal.classList.contains('visible')) pmClose();
+      if (helpModal.classList.contains('visible')) closeHelp();
     } else if (e.key === 'Enter') {
       if (sm.modal.classList.contains('visible')) smSubmit();
       else if (pm.modal.classList.contains('visible')) pmSubmit();
+    }
+  });
+
+  // F1 開幫助；? 也可（但要在 xterm 沒 focus 時才生效，避免吃掉 cc 自己的 ? 提示鍵）
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'F1') {
+      e.preventDefault();
+      if (helpModal.classList.contains('visible')) closeHelp(); else openHelp();
+    }
+    // ? 只在 xterm 沒 focus 時生效（避免 cc 內 ? 鍵被吞）
+    if (e.key === '?' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      const target = e.target;
+      const inXterm = target && target.closest && target.closest('.xterm');
+      const inInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+      if (!inXterm && !inInput) {
+        e.preventDefault();
+        if (!helpModal.classList.contains('visible')) openHelp();
+      }
     }
   });
 

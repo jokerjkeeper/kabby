@@ -337,6 +337,26 @@
     .chip:hover { background: #3a3a3a; color: #ddd; }
     .chip.active { background: #094771; color: #fff; border-color: #0e639c; }
     .chip.active:hover { background: #0e639c; }
+
+    /* Help modal kbd 樣式 */
+    #help-modal kbd {
+      background: #1e1e1e;
+      border: 1px solid #555;
+      border-radius: 3px;
+      padding: 1px 6px;
+      font-family: 'Cascadia Code', Consolas, monospace;
+      font-size: 11px;
+      color: #ddd;
+      box-shadow: 0 1px 0 #333;
+    }
+    #help-modal code {
+      background: #1e1e1e;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 11px;
+      color: #d4d4d4;
+    }
+    #help-btn { font-weight: bold; font-size: 13px; min-width: 22px; line-height: 18px; padding: 0 6px; }
   </style>
 </head>
 <body>
@@ -377,11 +397,13 @@
       <div id="tab-list"></div>
       <div id="tab-empty">尚無已開啟的 tab — 從左側 sidebar 選 session attach</div>
       <span id="tab-hint">Ctrl+Shift+←/→ 切換</span>
+      <button class="btn tiny" id="help-btn" title="鍵盤快捷鍵與重繪 (F1)" style="margin-right:8px">?</button>
     </div>
     <div id="statusbar">
       <span id="status-text" style="color:#888">未選擇 session</span>
       <span class="spacer"></span>
       <span id="meta" style="color:#888"></span>
+      <button id="redraw-btn" class="btn" style="display:none" title="送 Ctrl+L 給 cc 重繪畫面（多 client size 不同造成 TUI 殘留時用）">重繪</button>
       <button id="kill-btn" class="btn danger" style="display:none" title="殺掉這個 PTY（所有 client 會斷開，cc session 結束）">殺 session</button>
     </div>
     <div id="term-wrap">
@@ -423,6 +445,33 @@
       <div class="actions">
         <button class="btn" id="sm-cancel">取消</button>
         <button class="btn primary" id="sm-submit">建立並進入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: help (keyboard shortcuts) -->
+  <div class="modal-backdrop" id="help-modal">
+    <div class="modal">
+      <h2>鍵盤快捷鍵</h2>
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <tbody>
+          <tr><td style="padding:6px 0; color:#aaa; width:140px;"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd></td><td>切換 tab</td></tr>
+          <tr><td style="padding:6px 0; color:#aaa;"><kbd>Ctrl</kbd>+<kbd>L</kbd></td><td>送給 cc 重繪畫面（多 client size 不同造成 TUI 殘留時用）</td></tr>
+          <tr><td style="padding:6px 0; color:#aaa;">中鍵點 tab</td><td>關閉 tab（等同點 <code>×</code>，PTY 不殺）</td></tr>
+          <tr><td style="padding:6px 0; color:#aaa;"><kbd>F1</kbd> 或 <kbd>?</kbd></td><td>開 / 關這個說明視窗</td></tr>
+          <tr><td style="padding:6px 0; color:#aaa;"><kbd>Esc</kbd></td><td>關閉 modal（含本視窗）</td></tr>
+        </tbody>
+      </table>
+
+      <h2 style="margin-top:20px">畫面亂掉了？</h2>
+      <div style="color:#bbb; line-height:1.6; font-size:12px;">
+        多個 client（kabby Web UI + wepages iframe）視窗大小不一樣時，cc 的 TUI（選單、表單）對 size 變化的重繪不完美，可能殘留前一個尺寸的畫面。<br>
+        ▸ 點狀態列的 <b>重繪</b> 按鈕，或按 <kbd>Ctrl</kbd>+<kbd>L</kbd>，cc 會收到重繪訊號自動清整畫面。
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" id="help-redraw" title="送 Ctrl+L 給當前 session">立即重繪</button>
+        <button class="btn" id="help-close">關閉</button>
       </div>
     </div>
   </div>
