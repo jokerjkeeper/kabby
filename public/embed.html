@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <title>kabby embed</title>
+  <link rel="stylesheet" href="https://unpkg.com/@xterm/xterm@5.5.0/css/xterm.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+    }
+    #bar {
+      background: #2d2d2d;
+      padding: 4px 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #333;
+      flex: 0 0 auto;
+    }
+    #bar .dot { width: 8px; height: 8px; border-radius: 50%; background: #888; }
+    #bar .dot.connected { background: #4caf50; }
+    #bar .dot.disconnected { background: #f44336; }
+    #bar .info { color: #aaa; }
+    #bar .info b { color: #f0f0f0; }
+    #term { flex: 1; padding: 4px; min-height: 0; }
+    #error { padding: 14px; color: #f48771; }
+    #error.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <span class="dot" id="dot"></span>
+    <span class="info" id="info">connecting…</span>
+  </div>
+  <div id="term"></div>
+  <div id="error" class="hidden"></div>
+
+  <script src="https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+  <script src="https://unpkg.com/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+  <script src="/embed.js"></script>
+</body>
+</html>

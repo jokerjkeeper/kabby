@@ -1,0 +1,19 @@
+{
+  "name": "kabby",
+  "version": "0.1.0",
+  "description": "PTY multiplexer daemon — one cc, many clients (desktop + iframe) attach like tmux",
+  "main": "src/daemon.js",
+  "scripts": {
+    "start": "node src/daemon.js",
+    "dev": "node --watch src/daemon.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.1",
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

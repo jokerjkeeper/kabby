@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <title>kabby</title>
+  <link rel="stylesheet" href="https://unpkg.com/@xterm/xterm@5.5.0/css/xterm.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      overflow: hidden;
+    }
+
+    /* Sidebar shell */
+    #sidebar {
+      background: #252526;
+      border-right: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    #sidebar-header {
+      padding: 10px 12px;
+      border-bottom: 1px solid #333;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    #sidebar-header h1 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f0f0f0;
+    }
+    #sidebar-header h1 small { color: #888; font-weight: 400; margin-left: 4px; }
+    .btn {
+      background: #3c3c3c;
+      color: #ccc;
+      border: 0;
+      border-radius: 3px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn:hover { background: #505050; }
+    .btn.primary { background: #0e639c; color: #fff; }
+    .btn.primary:hover { background: #1177bb; }
+    .btn.danger:hover { background: #a1260d; color: #fff; }
+    .btn.tiny { padding: 2px 8px; font-size: 11px; }
+    .btn:disabled { background: #2a2a2a !important; color: #555 !important; cursor: not-allowed; }
+
+    #sidebar-body { flex: 1; overflow-y: auto; }
+
+    /* Sidebar sections */
+    .section { border-bottom: 1px solid #2a2a2a; }
+    .section-head {
+      padding: 8px 12px 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #888;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .section-head .actions { display: flex; gap: 4px; }
+    .empty-hint { padding: 10px 14px 14px; color: #777; font-size: 11px; line-height: 1.5; }
+
+    /* Profile cards */
+    .profile-card {
+      margin: 0 6px 6px;
+      background: #2a2a2b;
+      border: 1px solid #333;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .profile-head {
+      padding: 8px 10px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .profile-head:hover { background: #313132; }
+    .profile-name { font-weight: 600; color: #f0f0f0; display: flex; align-items: center; gap: 6px; }
+    .profile-meta { color: #888; font-size: 11px; }
+    .profile-body {
+      padding: 6px 10px 10px;
+      border-top: 1px solid #333;
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .profile-card.expanded .profile-body { display: flex; }
+    .profile-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .history-list {
+      margin-top: 4px;
+      border-top: 1px dashed #3a3a3a;
+      padding-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .history-list .empty { color: #666; font-size: 11px; padding: 4px 0; }
+    .history-item {
+      padding: 5px 6px;
+      border-radius: 3px;
+      background: #1f1f20;
+      border: 1px solid #2e2e2e;
+      cursor: pointer;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    .history-item:hover { background: #2a2a2c; border-color: #444; }
+    .history-item.busy { opacity: 0.55; cursor: not-allowed; }
+    .history-item .summary { color: #d4d4d4; }
+    .history-item .meta { color: #777; font-size: 10px; margin-top: 2px; display: flex; gap: 6px; align-items: center; }
+    .history-item.busy .summary::after {
+      content: ' · 掛載中';
+      color: #d7ba7d;
+    }
+
+    /* Session cards (running) */
+    .session-item {
+      padding: 8px 14px;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .session-item:hover { background: #2a2d2e; }
+    .session-item.active {
+      background: #094771;
+      border-left-color: #0e639c;
+    }
+    .session-item.dead { opacity: 0.45; }
+    .session-name { font-weight: 600; color: #f0f0f0; display: flex; align-items: center; gap: 6px; }
+    .session-meta { color: #888; font-size: 11px; }
+    .badge {
+      background: #333;
+      color: #ccc;
+      border-radius: 8px;
+      padding: 0 6px;
+      font-size: 10px;
+      line-height: 14px;
+    }
+    .badge.warn { background: #5a4a1d; color: #ffd97a; }
+    .session-item.active .badge { background: #1177bb; color: #fff; }
+
+    /* Main area */
+    #main { display: flex; flex-direction: column; min-width: 0; }
+
+    /* Tab bar — Tabby 風格 */
+    #tab-bar {
+      background: #1f1f1f;
+      border-bottom: 1px solid #333;
+      display: flex;
+      align-items: stretch;
+      min-height: 32px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: thin;
+    }
+    #tab-bar::-webkit-scrollbar { height: 4px; }
+    #tab-bar::-webkit-scrollbar-thumb { background: #444; }
+    #tab-list { display: flex; flex: 1 1 auto; min-width: 0; }
+    .tab {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 8px 0 12px;
+      max-width: 220px;
+      min-width: 100px;
+      background: #2a2a2a;
+      border-right: 1px solid #1a1a1a;
+      cursor: pointer;
+      color: #aaa;
+      font-size: 12px;
+      position: relative;
+      flex: 0 1 auto;
+      transition: background 0.1s;
+    }
+    .tab:hover { background: #333; color: #ddd; }
+    .tab.active {
+      background: #1e1e1e;
+      color: #fff;
+    }
+    .tab.active::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: #0e639c;
+    }
+    .tab .tab-dot {
+      width: 6px; height: 6px; border-radius: 50%; background: #888;
+      flex: 0 0 auto;
+    }
+    .tab .tab-dot.connected { background: #4caf50; }
+    .tab .tab-dot.disconnected { background: #f44336; }
+    .tab .tab-name {
+      flex: 1 1 auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+    .tab .tab-close {
+      flex: 0 0 auto;
+      width: 16px; height: 16px;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #888;
+      background: transparent;
+      border: 0;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      opacity: 0.5;
+    }
+    .tab:hover .tab-close { opacity: 1; }
+    .tab .tab-close:hover { background: #555; color: #fff; }
+    #tab-empty {
+      color: #555;
+      font-size: 11px;
+      padding: 8px 14px;
+      align-self: center;
+    }
+    #tab-hint {
+      color: #666;
+      font-size: 10px;
+      padding: 0 12px;
+      align-self: center;
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
+    /* Status bar — 比原 topbar 精簡 */
+    #statusbar {
+      background: #2d2d2d;
+      padding: 4px 14px;
+      border-bottom: 1px solid #333;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 11px;
+      min-height: 26px;
+    }
+    #statusbar .spacer { flex: 1; }
+    #term-wrap { flex: 1; position: relative; background: #1e1e1e; min-height: 0; }
+    .term-pane {
+      position: absolute;
+      inset: 0;
+      padding: 6px;
+      display: none;
+    }
+    .term-pane.visible { display: block; }
+    #placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #555;
+      font-size: 14px;
+      flex-direction: column;
+      gap: 12px;
+    }
+    #placeholder.hidden { display: none; }
+    #placeholder code { background: #2d2d2d; padding: 2px 6px; border-radius: 3px; color: #ccc; }
+
+    /* Modals */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal-backdrop.visible { display: flex; }
+    .modal {
+      background: #2d2d2d;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 20px 22px;
+      min-width: 460px;
+      max-width: 600px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .modal h2 { font-size: 15px; margin-bottom: 14px; }
+    .modal label { display: block; margin: 10px 0 4px; font-size: 12px; color: #aaa; }
+    .modal input, .modal textarea {
+      width: 100%;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border: 1px solid #444;
+      border-radius: 3px;
+      padding: 6px 8px;
+      font-family: 'Cascadia Code', Consolas, monospace;
+      font-size: 13px;
+    }
+    .modal .hint { font-size: 11px; color: #777; margin-top: 3px; }
+    .modal .actions { margin-top: 18px; display: flex; gap: 8px; justify-content: flex-end; }
+    .modal .actions button {
+      padding: 6px 14px;
+      border: 0;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .modal .error { color: #f48771; font-size: 12px; margin-top: 8px; min-height: 14px; }
+
+    .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .chip {
+      background: #2a2a2a;
+      color: #aaa;
+      border: 1px solid #444;
+      border-radius: 12px;
+      padding: 2px 10px;
+      font-family: 'Cascadia Code', Consolas, monospace;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s, border-color 0.1s;
+    }
+    .chip:hover { background: #3a3a3a; color: #ddd; }
+    .chip.active { background: #094771; color: #fff; border-color: #0e639c; }
+    .chip.active:hover { background: #0e639c; }
+  </style>
+</head>
+<body>
+  <aside id="sidebar">
+    <header id="sidebar-header">
+      <h1>kabby <small>· v0.1</small></h1>
+      <div style="display:flex; gap:4px">
+        <button class="btn primary" id="new-profile-btn" title="建立新項目（保存配置）">+ 項目</button>
+        <button class="btn" id="new-session-btn" title="建立臨時 session（不存項目）">+ 臨時</button>
+      </div>
+    </header>
+    <div id="sidebar-body">
+      <section class="section" id="sec-profiles">
+        <div class="section-head">
+          <span>Projects</span>
+          <div class="actions">
+            <button class="btn tiny" id="open-viewer-btn" title="開啟 cc history viewer（需設定 KABBY_VIEWER_PATH）" disabled>viewer</button>
+          </div>
+        </div>
+        <div id="profile-list">
+          <div class="empty-hint">尚無項目。點右上「+ 項目」建立。</div>
+        </div>
+      </section>
+      <section class="section" id="sec-running">
+        <div class="section-head">
+          <span>Running</span>
+          <span style="text-transform:none; letter-spacing:0; color:#666; font-size:10px">點擊 attach</span>
+        </div>
+        <div id="session-list">
+          <div class="empty-hint">尚無運行中 session。</div>
+        </div>
+      </section>
+    </div>
+  </aside>
+
+  <main id="main">
+    <div id="tab-bar">
+      <div id="tab-list"></div>
+      <div id="tab-empty">尚無已開啟的 tab — 從左側 sidebar 選 session attach</div>
+      <span id="tab-hint">Ctrl+Shift+←/→ 切換</span>
+    </div>
+    <div id="statusbar">
+      <span id="status-text" style="color:#888">未選擇 session</span>
+      <span class="spacer"></span>
+      <span id="meta" style="color:#888"></span>
+      <button id="kill-btn" class="btn danger" style="display:none" title="殺掉這個 PTY（所有 client 會斷開，cc session 結束）">殺 session</button>
+    </div>
+    <div id="term-wrap">
+      <div id="placeholder">
+        <div>從左側 sidebar 點 session（Running 區）→ attach 進來開 tab</div>
+        <div style="font-size:12px; color:#666">或點上方「+ 項目 / + 臨時」建新 session</div>
+        <div style="font-size:12px; margin-top:8px">Daemon: <code id="daemon-url"></code></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Modal: temporary session (or launch from profile) -->
+  <div class="modal-backdrop" id="session-modal">
+    <div class="modal">
+      <h2 id="sm-title">新建臨時 session</h2>
+      <label for="sm-name">名稱 *</label>
+      <input id="sm-name" type="text" placeholder="例：cc-test" autocomplete="off" />
+      <div class="hint">給自己看的識別名，不可與現有活著的 session 重複。</div>
+
+      <label for="sm-cwd">工作目錄</label>
+      <input id="sm-cwd" type="text" placeholder="例：D:\Projects\RS\my-app\unity（留空 = daemon cwd）" autocomplete="off" />
+      <div class="hint">cc 啟動時的 cwd。Windows 反斜線或正斜線皆可。</div>
+
+      <label for="sm-cmd">執行檔（進階，可留空）</label>
+      <input id="sm-cmd" type="text" placeholder="預設：claude.cmd（Win）/ claude（Unix）" autocomplete="off" />
+      <div class="hint">想跑別的 shell（如 <code>cmd.exe</code> / <code>bash</code>）才填。</div>
+
+      <label for="sm-args">啟動參數（進階，可留空）</label>
+      <input id="sm-args" type="text" placeholder="預設：--dangerously-skip-permissions" autocomplete="off" />
+      <div class="hint">以空格分隔。留空 = 預設 <code>--dangerously-skip-permissions</code>；想「無參數」填單一空格。</div>
+      <div class="chip-row" id="sm-arg-chips">
+        <button type="button" class="chip" data-flag="--dangerously-skip-permissions">--dangerously-skip-permissions</button>
+        <button type="button" class="chip" data-flag="--verbose">--verbose</button>
+        <button type="button" class="chip" data-flag="--enable-auto-mode">--enable-auto-mode</button>
+        <button type="button" class="chip" data-flag="--debug">--debug</button>
+      </div>
+
+      <div class="error" id="sm-error"></div>
+      <div class="actions">
+        <button class="btn" id="sm-cancel">取消</button>
+        <button class="btn primary" id="sm-submit">建立並進入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: profile (create/edit) -->
+  <div class="modal-backdrop" id="profile-modal">
+    <div class="modal">
+      <h2 id="pm-title">新建項目</h2>
+      <label for="pm-name">項目名稱 *</label>
+      <input id="pm-name" type="text" placeholder="例：unity / wepages" autocomplete="off" />
+      <div class="hint">用於辨識，跟其他項目不可重名。</div>
+
+      <label for="pm-cwd">工作目錄 *</label>
+      <input id="pm-cwd" type="text" placeholder="例：D:\Projects\RS\my-app\unity" autocomplete="off" />
+      <div class="hint">cc 啟動的 cwd。也用來定位 cc 對話歷史目錄。</div>
+
+      <label for="pm-cmd">執行檔（進階，可留空）</label>
+      <input id="pm-cmd" type="text" placeholder="預設：claude.cmd（Win）/ claude（Unix）" autocomplete="off" />
+
+      <label for="pm-args">啟動參數（進階，可留空）</label>
+      <input id="pm-args" type="text" placeholder="預設：--dangerously-skip-permissions" autocomplete="off" />
+      <div class="chip-row" id="pm-arg-chips">
+        <button type="button" class="chip" data-flag="--dangerously-skip-permissions">--dangerously-skip-permissions</button>
+        <button type="button" class="chip" data-flag="--verbose">--verbose</button>
+        <button type="button" class="chip" data-flag="--enable-auto-mode">--enable-auto-mode</button>
+        <button type="button" class="chip" data-flag="--debug">--debug</button>
+      </div>
+
+      <div class="error" id="pm-error"></div>
+      <div class="actions">
+        <button class="btn danger" id="pm-delete" style="display:none; margin-right:auto">刪除</button>
+        <button class="btn" id="pm-cancel">取消</button>
+        <button class="btn primary" id="pm-submit">儲存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+  <script src="https://unpkg.com/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
