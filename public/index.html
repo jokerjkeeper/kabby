@@ -130,6 +130,7 @@
 
     /* Session cards (running) */
     .session-item {
+      position: relative;
       padding: 8px 14px;
       cursor: pointer;
       border-left: 3px solid transparent;
@@ -138,11 +139,28 @@
       gap: 2px;
     }
     .session-item:hover { background: #2a2d2e; }
+    .session-kill {
+      position: absolute;
+      top: 6px; right: 8px;
+      width: 18px; height: 18px;
+      border-radius: 3px;
+      border: 0;
+      background: transparent;
+      color: #888;
+      font-size: 12px;
+      line-height: 1;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.1s;
+    }
+    .session-item:hover .session-kill { opacity: 0.7; }
+    .session-kill:hover { background: #a1260d; color: #fff; opacity: 1; }
     .session-item.active {
       background: #094771;
       border-left-color: #0e639c;
     }
     .session-item.dead { opacity: 0.45; }
+    .session-item.attached { border-left-color: #4ec9b0; }
     .session-name { font-weight: 600; color: #f0f0f0; display: flex; align-items: center; gap: 6px; }
     .session-meta { color: #888; font-size: 11px; }
     .badge {
@@ -261,13 +279,75 @@
     }
     #statusbar .spacer { flex: 1; }
     #term-wrap { flex: 1; position: relative; background: #1e1e1e; min-height: 0; }
-    .term-pane {
+
+    /* 每個 tab 一個容器；只有 active 顯示 */
+    .tab-content {
       position: absolute;
       inset: 0;
-      padding: 6px;
       display: none;
     }
-    .term-pane.visible { display: block; }
+    .tab-content.active { display: flex; }
+
+    /* Split node：flex 容器，row=左右並排 / col=上下疊 */
+    .split { display: flex; flex: 1 1 0; min-width: 0; min-height: 0; }
+    .split.row { flex-direction: row; }
+    .split.col { flex-direction: column; }
+
+    /* Gutter（可拖曳分隔線） */
+    .gutter { flex: 0 0 6px; background: #333; }
+    .gutter:hover { background: #4ec9b0; }
+    .split.row > .gutter { cursor: col-resize; }
+    .split.col > .gutter { cursor: row-resize; }
+
+    /* Leaf pane */
+    .term-pane {
+      position: relative;
+      flex: 1 1 0;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      padding: 4px;
+      border: 1px solid transparent;
+    }
+    .term-pane.focused { border-color: #4ec9b0; }
+    .term-pane .xterm { height: 100%; }
+
+    /* 空 pane（split 出來、等待填 session） */
+    .pane-empty {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 6px;
+      color: #666;
+      font-size: 12px;
+      text-align: center;
+      padding: 12px;
+    }
+    .pane-empty .hint-strong { color: #999; }
+
+    /* pane × 關閉鈕（焦點 / hover 時顯示） */
+    .pane-close {
+      position: absolute;
+      top: 4px; right: 6px;
+      z-index: 5;
+      width: 18px; height: 18px;
+      border-radius: 3px;
+      border: 0;
+      background: rgba(60,60,60,0.7);
+      color: #aaa;
+      font-size: 13px;
+      line-height: 1;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.1s;
+    }
+    .term-pane:hover .pane-close,
+    .term-pane.focused .pane-close { opacity: 0.8; }
+    .pane-close:hover { background: #a1260d; color: #fff; opacity: 1 !important; }
+
     #placeholder {
       position: absolute;
       inset: 0;
@@ -398,13 +478,15 @@
     <div id="tab-bar">
       <div id="tab-list"></div>
       <div id="tab-empty">尚無已開啟的 tab — 從左側 sidebar 選 session attach</div>
-      <span id="tab-hint">Ctrl+Shift+←/→ 切換</span>
+      <span id="tab-hint">Ctrl+Shift+←/→ 切 tab · D/E 分割 · W 關 pane</span>
       <button class="btn tiny" id="help-btn" title="鍵盤快捷鍵與重繪 (F1)" style="margin-right:8px">?</button>
     </div>
     <div id="statusbar">
       <span id="status-text" style="color:#888">未選擇 session</span>
       <span class="spacer"></span>
       <span id="meta" style="color:#888"></span>
+      <button id="split-h-btn" class="btn" style="display:none" title="左右分割焦點 pane（Ctrl+Shift+D）">切左右</button>
+      <button id="split-v-btn" class="btn" style="display:none" title="上下分割焦點 pane（Ctrl+Shift+E）">切上下</button>
       <button id="redraw-btn" class="btn" style="display:none" title="送 Ctrl+L 給 cc 重繪畫面（多 client size 不同造成 TUI 殘留時用）">重繪</button>
       <button id="kill-btn" class="btn danger" style="display:none" title="殺掉這個 PTY（所有 client 會斷開，cc session 結束）">殺 session</button>
     </div>
@@ -458,8 +540,13 @@
       <table style="width:100%; border-collapse:collapse; font-size:13px;">
         <tbody>
           <tr><td style="padding:6px 0; color:#aaa; width:140px;"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd></td><td>切換 tab</td></tr>
+          <tr><td style="padding:6px 0; color:#aaa;"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd></td><td>左右分割焦點 pane（同 tab 內並排）→ 出現空 pane，點 sidebar 填入不同 project 的 cc</td></tr>
+          <tr><td style="padding:6px 0; color:#aaa;"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></td><td>上下分割焦點 pane（同 tab 內上下疊），每 tab 最多 4 個 pane</td></tr>
+          <tr><td style="padding:6px 0; color:#aaa;"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd></td><td>關閉焦點 pane（或點 pane 右上 <code>×</code>，PTY 不殺）</td></tr>
+          <tr><td style="padding:6px 0; color:#aaa;">點擊 pane</td><td>切換鍵盤焦點到該 pane（青色框標示）</td></tr>
+          <tr><td style="padding:6px 0; color:#aaa;">拖曳分隔線</td><td>調整兩 pane 比例；<b>雙擊分隔線</b>還原 50/50</td></tr>
           <tr><td style="padding:6px 0; color:#aaa;"><kbd>Ctrl</kbd>+<kbd>L</kbd></td><td>送給 cc 重繪畫面（多 client size 不同造成 TUI 殘留時用）</td></tr>
-          <tr><td style="padding:6px 0; color:#aaa;">中鍵點 tab</td><td>關閉 tab（等同點 <code>×</code>，PTY 不殺）</td></tr>
+          <tr><td style="padding:6px 0; color:#aaa;">中鍵點 tab</td><td>關閉 tab（全部 pane detach，PTY 不殺）</td></tr>
           <tr><td style="padding:6px 0; color:#aaa;"><kbd>F1</kbd> 或 <kbd>?</kbd></td><td>開 / 關這個說明視窗</td></tr>
           <tr><td style="padding:6px 0; color:#aaa;"><kbd>Esc</kbd></td><td>關閉 modal（含本視窗）</td></tr>
         </tbody>

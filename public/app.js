@@ -7,9 +7,17 @@
   // ──────────────────────────────────────────────────────────────────────
   // State
   // ──────────────────────────────────────────────────────────────────────
-  /** @type {Map<string, {info:object, term:any, fit:any, ws:WebSocket|null, pane:HTMLElement, connected:boolean}>} */
-  const panes = new Map();
-  let activeId = null;
+  // ── Tab / pane tree 模型 ──
+  //   Leaf  = { kind:'leaf', paneId, el, sessionId, info, term, fit, ws, connected }  // sessionId=null → 空 pane
+  //   Split = { kind:'split', dir:'row'|'col', children:[Node,Node], ratio, el }       // row=左右並排 / col=上下疊
+  //   Tab   = { id, root:Node, el }                                                    // el 只在 active 時顯示
+  const tabs = [];                 // 有序，對應 tab bar
+  let activeTabId = null;
+  let focusedPaneId = null;        // active tab 內有鍵盤焦點的 leaf
+  let pendingFillPaneId = null;    // 剛 split 出、等待填 session 的空 leaf
+  const leaves = new Map();        // paneId → Leaf（含空 leaf）
+  let paneSeq = 0, tabSeq = 0;
+  const MAX_PANES_PER_TAB = 4;
   let viewerConfigured = false;
   const expandedProfiles = new Set();      // 哪些 profile 卡片是展開的
   const historyCache = new Map();          // profileId → history array
@@ -25,6 +33,8 @@
   const metaEl = document.getElementById('meta');
   const killBtn = document.getElementById('kill-btn');
   const redrawBtn = document.getElementById('redraw-btn');
+  const splitHBtn = document.getElementById('split-h-btn');
+  const splitVBtn = document.getElementById('split-v-btn');
   const openViewerBtn = document.getElementById('open-viewer-btn');
   const tabListEl = document.getElementById('tab-list');
   const tabEmptyEl = document.getElementById('tab-empty');
@@ -177,7 +187,7 @@
       // 新 PTY 上線 → busy set 變了，清 history cache 讓展開的歷史列表反映
       historyCache.clear();
       await Promise.all([refreshProfiles(), refreshSessions()]);
-      activate(json.id, json);
+      openSession(json.id, json);
     } catch (err) {
       alert('啟動失敗：' + err.message);
     }
@@ -213,20 +223,34 @@
       sessionListEl.innerHTML = '<div class="empty-hint">尚無運行中 session。</div>';
       return;
     }
+    const attached = new Set([...leaves.values()].filter((l) => l.sessionId).map((l) => l.sessionId));
+    const focusedLeaf = leaves.get(focusedPaneId);
+    const focusedSid = focusedLeaf ? focusedLeaf.sessionId : null;
     sessionListEl.innerHTML = '';
     for (const s of sessions) {
+      const isFocused = s.id === focusedSid;
+      const isAttached = attached.has(s.id);
       const div = document.createElement('div');
-      div.className = 'session-item' + (s.id === activeId ? ' active' : '') + (s.alive ? '' : ' dead');
+      div.className = 'session-item'
+        + (isFocused ? ' active' : '')
+        + (isAttached && !isFocused ? ' attached' : '')
+        + (s.alive ? '' : ' dead');
       div.dataset.id = s.id;
       div.innerHTML = `
+        <button class="session-kill" title="殺掉這個 session（PTY 結束，免先連回去；掛載中徽章會解除）">✕</button>
         <div class="session-name">
           <span>${escapeHtml(s.name)}</span>
           <span class="badge">${s.clientCount} clt</span>
+          ${isAttached ? '<span class="badge" title="已在某個 pane 開啟">開啟中</span>' : ''}
           ${s.ccSessionId ? '<span class="badge" title="cc session id">resumed</span>' : ''}
         </div>
         <div class="session-meta">${escapeHtml(shorten(s.cwd, 36))}</div>
       `;
-      div.addEventListener('click', () => activate(s.id, s));
+      div.addEventListener('click', () => openSession(s.id, s));
+      div.querySelector('.session-kill').addEventListener('click', (e) => {
+        e.stopPropagation();
+        killSession(s.id, s.name);
+      });
       sessionListEl.appendChild(div);
     }
   }
@@ -234,12 +258,12 @@
   async function refreshSessions() {
     const sessions = await fetchSessions();
     renderSessions(sessions);
-    for (const s of sessions) {
-      const p = panes.get(s.id);
-      if (p) p.info = s;
-    }
-    for (const id of [...panes.keys()]) {
-      if (!sessions.find((s) => s.id === id)) closePane(id, false);
+    const byId = new Map(sessions.map((s) => [s.id, s]));
+    for (const leaf of [...leaves.values()]) {
+      if (!leaf.sessionId) continue;
+      const s = byId.get(leaf.sessionId);
+      if (s) leaf.info = s;
+      else removeLeaf(leaf.paneId);     // server 上消失（PTY 已結束）→ 收掉 pane
     }
   }
 
@@ -264,89 +288,127 @@
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Tabs
+  // Tab / pane tree — 樹結構工具
+  // ──────────────────────────────────────────────────────────────────────
+  function activeTab() { return tabs.find((t) => t.id === activeTabId) || null; }
+  function tabById(id) { return tabs.find((t) => t.id === id) || null; }
+  function leavesOf(node, out = []) {
+    if (!node) return out;
+    if (node.kind === 'leaf') out.push(node);
+    else { leavesOf(node.children[0], out); leavesOf(node.children[1], out); }
+    return out;
+  }
+  function tabOfLeaf(paneId) {
+    for (const t of tabs) if (leavesOf(t.root).some((l) => l.paneId === paneId)) return t;
+    return null;
+  }
+  function sessionToLeaf(sessionId) {
+    for (const leaf of leaves.values()) if (leaf.sessionId === sessionId) return leaf;
+    return null;
+  }
+  // 把樹裡的 target 節點換成 replacement（target 可為 leaf 或 split）
+  function replaceNode(tab, target, replacement) {
+    if (tab.root === target) { tab.root = replacement; return; }
+    const walk = (node) => {
+      if (node.kind !== 'split') return false;
+      for (let i = 0; i < 2; i++) {
+        if (node.children[i] === target) { node.children[i] = replacement; return true; }
+        if (walk(node.children[i])) return true;
+      }
+      return false;
+    };
+    walk(tab.root);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Tab bar 渲染
   // ──────────────────────────────────────────────────────────────────────
   function renderTabs() {
     tabListEl.innerHTML = '';
-    if (panes.size === 0) {
+    if (tabs.length === 0) {
       tabEmptyEl.style.display = '';
       return;
     }
     tabEmptyEl.style.display = 'none';
-    for (const [id, pane] of panes) {
-      const info = pane.info || {};
-      const tab = document.createElement('div');
-      tab.className = 'tab' + (id === activeId ? ' active' : '');
-      tab.dataset.id = id;
-      tab.title = info.cwd || info.name || id;
-      tab.innerHTML = `
-        <span class="tab-dot ${pane.connected ? 'connected' : 'disconnected'}"></span>
-        <span class="tab-name">${escapeHtml(info.name || id.slice(0, 8))}</span>
-        <button class="tab-close" title="關閉 tab（保留 session，PTY 不殺）">×</button>
+    for (const tab of tabs) {
+      const ls = leavesOf(tab.root);
+      const focused = ls.find((l) => l.paneId === focusedPaneId) || ls[0];
+      const info = (focused && focused.info) || {};
+      const anyConnected = ls.some((l) => l.connected);
+      const el = document.createElement('div');
+      el.className = 'tab' + (tab.id === activeTabId ? ' active' : '');
+      el.dataset.tabId = tab.id;
+      el.title = info.cwd || info.name || tab.id;
+      const name = info.name || (focused && focused.sessionId ? focused.sessionId.slice(0, 8) : '空 pane');
+      const paneBadge = ls.length > 1 ? `<span class="badge" title="${ls.length} 個 pane">${ls.length}◫</span>` : '';
+      el.innerHTML = `
+        <span class="tab-dot ${anyConnected ? 'connected' : 'disconnected'}"></span>
+        <span class="tab-name">${escapeHtml(name)}</span>
+        ${paneBadge}
+        <button class="tab-close" title="關閉 tab（全部 pane detach，PTY 不殺）">×</button>
       `;
-      tab.addEventListener('mousedown', (e) => {
-        // 中鍵 = 關 tab
-        if (e.button === 1) { e.preventDefault(); detachTab(id); }
+      el.addEventListener('mousedown', (e) => {
+        if (e.button === 1) { e.preventDefault(); closeTab(tab.id); }   // 中鍵 = 關 tab
       });
-      tab.addEventListener('click', (e) => {
-        if (e.target.closest('.tab-close')) return;     // close 自己處理
-        activate(id, info);
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('.tab-close')) return;
+        setActiveTab(tab.id);
       });
-      tab.querySelector('.tab-close').addEventListener('click', (e) => {
+      el.querySelector('.tab-close').addEventListener('click', (e) => {
         e.stopPropagation();
-        detachTab(id);
+        closeTab(tab.id);
       });
-      tabListEl.appendChild(tab);
+      tabListEl.appendChild(el);
     }
-  }
-
-  function detachTab(id) {
-    // 只關 tab：斷 WS、移除 pane DOM，PTY 保留。sidebar 仍會列著該 session。
-    closePane(id, false);
   }
 
   function switchTabByOffset(offset) {
-    const ids = [...panes.keys()];
-    if (ids.length < 2) return;
-    const idx = ids.indexOf(activeId);
-    if (idx < 0) {
-      activate(ids[0], panes.get(ids[0]).info);
-      return;
-    }
-    const next = ids[(idx + offset + ids.length) % ids.length];
-    activate(next, panes.get(next).info);
+    if (tabs.length < 2) return;
+    const idx = tabs.findIndex((t) => t.id === activeTabId);
+    if (idx < 0) { setActiveTab(tabs[0].id); return; }
+    const next = tabs[(idx + offset + tabs.length) % tabs.length];
+    setActiveTab(next.id);
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Pane management
+  // Leaf（pane）建立 / 終端 / WS
   // ──────────────────────────────────────────────────────────────────────
-  function activate(id, info) {
-    activeId = id;
-    placeholder.classList.add('hidden');
-    let p = panes.get(id);
-    if (!p) {
-      p = createPane(id, info);
-      panes.set(id, p);
-    } else if (info) {
-      p.info = info;
-    }
-    for (const [pid, pane] of panes) {
-      pane.pane.classList.toggle('visible', pid === id);
-    }
-    updateStatusbar(p);
-    renderTabs();
-    requestAnimationFrame(() => {
-      try { p.fit.fit(); } catch {}
-      sendResize(p);
-    });
-    refreshSessions();
+  function createLeaf(sessionId, info) {
+    const paneId = 'p' + (++paneSeq);
+    const el = document.createElement('div');
+    el.className = 'term-pane';
+    el.dataset.paneId = paneId;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'pane-close';
+    closeBtn.title = '關閉這個 pane（PTY 保留，可從 sidebar 重新 attach）';
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closeLeaf(paneId, false); });
+    el.appendChild(closeBtn);
+    el.addEventListener('mousedown', () => focusLeaf(paneId));
+
+    const leaf = { kind: 'leaf', paneId, el, sessionId: sessionId || null, info: info || null,
+                   term: null, fit: null, ws: null, connected: false, _ph: null };
+    leaves.set(paneId, leaf);
+    if (sessionId) wireLeafTerminal(leaf);
+    else showEmptyPlaceholder(leaf);
+    return leaf;
   }
 
-  function createPane(id, info) {
-    const div = document.createElement('div');
-    div.className = 'term-pane';
-    wrap.appendChild(div);
+  function showEmptyPlaceholder(leaf) {
+    const ph = document.createElement('div');
+    ph.className = 'pane-empty';
+    ph.innerHTML = '<div class="hint-strong">空 pane</div><div>點左側 Projects「新對話」或 Running 的 session<br>填入這裡（不會開新 tab）</div>';
+    leaf.el.appendChild(ph);
+    leaf._ph = ph;
+  }
+  function removeEmptyPlaceholder(leaf) {
+    if (leaf._ph) { leaf._ph.remove(); leaf._ph = null; }
+  }
 
+  // 建立 xterm + 連 WS（空 pane 被填入時也走這裡）
+  function wireLeafTerminal(leaf) {
+    removeEmptyPlaceholder(leaf);
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 14,
@@ -355,119 +417,357 @@
       scrollback: 5000,
       allowProposedApi: true,
     });
-    // Ctrl+Shift+←/→ 給 kabby 切 tab 用，xterm 不處理
+    // 這些組合鍵保留給 kabby（切 tab / split / 關 pane），xterm 不處理
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
-        if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') return false;
+        if (['ArrowLeft', 'ArrowRight', 'KeyD', 'KeyE', 'KeyW'].includes(e.code)) return false;
       }
       return true;
     });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
-    term.open(div);
-    try { fit.fit(); } catch {}
-
-    const pane = { info, term, fit, ws: null, pane: div, connected: false };
+    term.open(leaf.el);
+    leaf.term = term;
+    leaf.fit = fit;
     term.onData((data) => {
-      if (pane.ws && pane.ws.readyState === WebSocket.OPEN) {
-        pane.ws.send(JSON.stringify({ type: 'input', data }));
+      if (leaf.ws && leaf.ws.readyState === WebSocket.OPEN) {
+        leaf.ws.send(JSON.stringify({ type: 'input', data }));
       }
     });
-    connect(id, pane);
-    return pane;
+    // 監看 pane 實際尺寸變化（split / 拖 gutter / 切 tab / window resize）自動 refit
+    const ro = new ResizeObserver(() => scheduleLeafFit(leaf));
+    ro.observe(leaf.el);
+    leaf.ro = ro;
+    scheduleLeafFit(leaf);
+    connect(leaf);
   }
 
-  function connect(id, pane) {
-    const ws = new WebSocket(WS_BASE + encodeURIComponent(id));
-    pane.ws = ws;
+  // 依 pane 當前尺寸 refit；rAF 去抖、隱藏中（0 尺寸）跳過
+  function scheduleLeafFit(leaf) {
+    if (leaf._fitRaf) return;
+    leaf._fitRaf = requestAnimationFrame(() => {
+      leaf._fitRaf = null;
+      if (!leaf.term || !leaf.fit) return;
+      if (leaf.el.clientWidth <= 0 || leaf.el.clientHeight <= 0) return;
+      try { leaf.fit.fit(); } catch {}
+      try { leaf.term.refresh(0, leaf.term.rows - 1); } catch {}
+      sendResize(leaf);
+    });
+  }
+
+  function connect(leaf) {
+    const ws = new WebSocket(WS_BASE + encodeURIComponent(leaf.sessionId));
+    leaf.ws = ws;
     ws.onopen = () => {
-      pane.connected = true;
-      if (activeId === id) updateStatusbar(pane);
+      leaf.connected = true;
+      if (focusedPaneId === leaf.paneId) updateStatusbar(leaf);
       renderTabs();
-      sendResize(pane);
+      sendResize(leaf);
     };
     ws.onmessage = (event) => {
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
-      if (msg.type === 'output') pane.term.write(msg.data);
+      if (msg.type === 'output') { if (leaf.term) leaf.term.write(msg.data); }
       else if (msg.type === 'exit') {
-        pane.term.write(`\r\n\x1b[33m[session exited code=${msg.code}]\x1b[0m\r\n`);
-        pane.connected = false;
-        if (activeId === id) updateStatusbar(pane);
+        if (leaf.term) leaf.term.write(`\r\n\x1b[33m[session exited code=${msg.code}]\x1b[0m\r\n`);
+        leaf.connected = false;
+        if (focusedPaneId === leaf.paneId) updateStatusbar(leaf);
         renderTabs();
       }
     };
     ws.onclose = () => {
-      pane.connected = false;
-      if (activeId === id) updateStatusbar(pane);
+      leaf.connected = false;
+      if (focusedPaneId === leaf.paneId) updateStatusbar(leaf);
       renderTabs();
     };
     ws.onerror = () => { try { ws.close(); } catch {} };
   }
 
-  function sendResize(pane) {
-    if (!pane.ws || pane.ws.readyState !== WebSocket.OPEN) return;
-    pane.ws.send(JSON.stringify({ type: 'resize', cols: pane.term.cols, rows: pane.term.rows }));
+  function sendResize(leaf) {
+    if (!leaf.term || !leaf.ws || leaf.ws.readyState !== WebSocket.OPEN) return;
+    leaf.ws.send(JSON.stringify({ type: 'resize', cols: leaf.term.cols, rows: leaf.term.rows }));
   }
 
-  function closePane(id, alsoDeleteServer) {
-    const p = panes.get(id);
-    if (!p) return;
-    try { p.ws && p.ws.close(); } catch {}
-    try { p.term.dispose(); } catch {}
-    p.pane.remove();
-    panes.delete(id);
-    if (activeId === id) {
-      activeId = null;
-      // 若還有其他 tab，自動切到下一個；否則回 placeholder
-      const remaining = [...panes.keys()];
-      if (remaining.length) {
-        const nextId = remaining[0];
-        activate(nextId, panes.get(nextId).info);
-      } else {
-        placeholder.classList.remove('hidden');
-        updateStatusbar(null);
-      }
-    }
+  // ──────────────────────────────────────────────────────────────────────
+  // Tab / pane lifecycle
+  // ──────────────────────────────────────────────────────────────────────
+  function createTab(sessionId, info) {
+    const id = 't' + (++tabSeq);
+    const el = document.createElement('div');
+    el.className = 'tab-content';
+    el.dataset.tabId = id;
+    wrap.appendChild(el);
+    const leaf = createLeaf(sessionId, info);
+    const tab = { id, root: leaf, el };
+    tabs.push(tab);
+    renderTabContent(tab);
+    setActiveTab(id);
+    return tab;
+  }
+
+  function applyFlex(childEl, grow) { childEl.style.flex = grow + ' 1 0'; }
+
+  // 遞迴把 tree 畫成 DOM；leaf 重用既有 .el（內含 live xterm）
+  function buildNode(node) {
+    if (node.kind === 'leaf') return node.el;
+    const sp = document.createElement('div');
+    sp.className = 'split ' + node.dir;
+    node.el = sp;
+    const a = buildNode(node.children[0]);
+    const b = buildNode(node.children[1]);
+    const r = node.ratio == null ? 0.5 : node.ratio;
+    applyFlex(a, r);
+    applyFlex(b, 1 - r);
+    const gutter = document.createElement('div');
+    gutter.className = 'gutter';
+    attachGutterDrag(gutter, node, sp);
+    sp.appendChild(a);
+    sp.appendChild(gutter);
+    sp.appendChild(b);
+    return sp;
+  }
+
+  function renderTabContent(tab) {
+    tab.el.innerHTML = '';                 // 移出 leaf .el（仍被 leaves/tree 參照，xterm 不毀）
+    tab.el.appendChild(buildNode(tab.root));
+    if (tab.id === activeTabId) fitTab(tab);
+  }
+
+  function attachGutterDrag(gutter, splitNode, splitEl) {
+    gutter.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const horizontal = splitNode.dir === 'row';
+      const rect = splitEl.getBoundingClientRect();
+      const total = horizontal ? rect.width : rect.height;
+      if (total <= 0) return;
+      const startPos = horizontal ? e.clientX : e.clientY;
+      const startRatio = splitNode.ratio == null ? 0.5 : splitNode.ratio;
+      const aEl = splitEl.children[0];
+      const bEl = splitEl.children[2];
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = horizontal ? 'col-resize' : 'row-resize';
+      const onMove = (ev) => {
+        const delta = (horizontal ? ev.clientX : ev.clientY) - startPos;
+        let r = startRatio + delta / total;
+        r = Math.max(0.1, Math.min(0.9, r));
+        splitNode.ratio = r;
+        applyFlex(aEl, r);
+        applyFlex(bEl, 1 - r);
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        const t = activeTab();
+        if (t) fitTab(t);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    // 雙擊 gutter = 還原 50/50（卡住時的逃生口）
+    gutter.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      splitNode.ratio = 0.5;
+      applyFlex(splitEl.children[0], 0.5);
+      applyFlex(splitEl.children[2], 0.5);
+      const t = activeTab();
+      if (t) fitTab(t);
+    });
+  }
+
+  function fitTab(tab) {
+    for (const leaf of leavesOf(tab.root)) scheduleLeafFit(leaf);
+  }
+
+  function setActiveTab(id) {
+    activeTabId = id;
+    placeholder.classList.add('hidden');
+    for (const t of tabs) t.el.classList.toggle('active', t.id === id);
+    const tab = tabById(id);
+    if (!tab) { renderTabs(); return; }
+    const ls = leavesOf(tab.root);
+    const keep = ls.find((l) => l.paneId === focusedPaneId);
+    focusLeaf((keep || ls[0]).paneId);
+    fitTab(tab);
+  }
+
+  function focusLeaf(paneId) {
+    focusedPaneId = paneId;
+    const leaf = leaves.get(paneId);
+    const tab = activeTab();
+    if (tab) for (const l of leavesOf(tab.root)) l.el.classList.toggle('focused', l.paneId === paneId);
+    if (leaf && leaf.term) { try { leaf.term.focus(); } catch {} }
+    updateStatusbar(leaf || null);
     renderTabs();
-    if (alsoDeleteServer) {
-      fetch(API + '/api/sessions/' + encodeURIComponent(id), { method: 'DELETE' })
+  }
+
+  // 左右(row) / 上下(col) 分割焦點 pane
+  function splitFocused(dir) {
+    const tab = activeTab();
+    if (!tab) return;
+    const leaf = leaves.get(focusedPaneId);
+    if (!leaf) return;
+    if (leavesOf(tab.root).length >= MAX_PANES_PER_TAB) { flashStatus(`每個 tab 最多 ${MAX_PANES_PER_TAB} 個 pane`); return; }
+    const empty = createLeaf(null, null);
+    const split = { kind: 'split', dir, children: [leaf, empty], ratio: 0.5, el: null };
+    replaceNode(tab, leaf, split);
+    renderTabContent(tab);
+    pendingFillPaneId = empty.paneId;
+    focusLeaf(empty.paneId);
+  }
+
+  // 把 session 填進空 pane
+  function fillPane(paneId, sessionId, info) {
+    const leaf = leaves.get(paneId);
+    if (!leaf) return;
+    leaf.sessionId = sessionId;
+    leaf.info = info;
+    wireLeafTerminal(leaf);
+    if (pendingFillPaneId === paneId) pendingFillPaneId = null;
+    const tab = tabOfLeaf(paneId);
+    if (tab && tab.id === activeTabId) fitTab(tab);
+    focusLeaf(paneId);
+    refreshSessions();
+  }
+
+  // sidebar 點 session/profile 的統一入口：填空 pane vs 開新 tab
+  function openSession(sessionId, info) {
+    const existing = sessionToLeaf(sessionId);
+    if (existing) {                             // 已開啟 → 聚焦既有 pane（不重複 attach）
+      const t = tabOfLeaf(existing.paneId);
+      if (t) setActiveTab(t.id);
+      focusLeaf(existing.paneId);
+      return;
+    }
+    const pendTab = pendingFillPaneId ? tabOfLeaf(pendingFillPaneId) : null;
+    if (pendTab && pendTab.id === activeTabId) {
+      fillPane(pendingFillPaneId, sessionId, info);
+    } else {
+      createTab(sessionId, info);
+    }
+  }
+
+  // 釋放單一 leaf 資源（不動樹、不發網路）
+  function disposeLeaf(leaf) {
+    try { leaf.ro && leaf.ro.disconnect(); } catch {}
+    try { leaf.ws && leaf.ws.close(); } catch {}
+    try { leaf.term && leaf.term.dispose(); } catch {}
+    leaves.delete(leaf.paneId);
+    if (pendingFillPaneId === leaf.paneId) pendingFillPaneId = null;
+  }
+
+  // 從樹移除 leaf（塌縮兄弟）；若是 tab 唯一 pane → 移除整個 tab。回傳 sessionId。純本地，不發網路
+  function removeLeaf(paneId) {
+    const leaf = leaves.get(paneId);
+    if (!leaf) return null;
+    const tab = tabOfLeaf(paneId);
+    const sid = leaf.sessionId;
+    if (tab && tab.root === leaf) {
+      removeTab(tab.id);
+      return sid;
+    }
+    disposeLeaf(leaf);
+    if (tab) {
+      // 找 parent split，用兄弟取代它
+      const findParent = (node) => {
+        if (node.kind !== 'split') return null;
+        if (node.children[0] === leaf || node.children[1] === leaf) return node;
+        return findParent(node.children[0]) || findParent(node.children[1]);
+      };
+      const parent = findParent(tab.root);
+      if (parent) {
+        const sibling = parent.children[0] === leaf ? parent.children[1] : parent.children[0];
+        replaceNode(tab, parent, sibling);
+        renderTabContent(tab);
+      }
+      const ls = leavesOf(tab.root);
+      if (focusedPaneId === paneId && ls.length) focusLeaf(ls[0].paneId);
+      else renderTabs();
+    }
+    return sid;
+  }
+
+  function removeTab(tabId) {
+    const idx = tabs.findIndex((t) => t.id === tabId);
+    if (idx < 0) return;
+    const tab = tabs[idx];
+    for (const leaf of leavesOf(tab.root)) disposeLeaf(leaf);
+    tab.el.remove();
+    tabs.splice(idx, 1);
+    if (activeTabId === tabId) {
+      activeTabId = null;
+      focusedPaneId = null;
+      if (tabs.length) setActiveTab(tabs[Math.min(idx, tabs.length - 1)].id);
+      else { placeholder.classList.remove('hidden'); updateStatusbar(null); renderTabs(); }
+    } else {
+      renderTabs();
+    }
+  }
+
+  // pane × / Ctrl+Shift+W / 殺 session
+  function closeLeaf(paneId, alsoDeleteServer) {
+    const sid = removeLeaf(paneId);
+    if (alsoDeleteServer && sid) {
+      fetch(API + '/api/sessions/' + encodeURIComponent(sid), { method: 'DELETE' })
         .catch(() => {})
-        .finally(() => {
-          // 殺 session 後 busy 狀態變了 — 清 history cache，讓已展開的歷史列表重抓 busy flag
-          historyCache.clear();
-          refreshAll();
-        });
+        .finally(() => { historyCache.clear(); refreshAll(); });
     } else {
       refreshSessions();
     }
   }
 
-  function updateStatusbar(pane) {
-    if (!pane) {
-      statusText.textContent = '未選擇 session';
+  // tab × / 中鍵：detach 整個 tab 全部 pane，PTY 全保留
+  function closeTab(tabId) {
+    removeTab(tabId);
+    refreshSessions();
+  }
+
+  // sidebar Running 的「殺」按鈕：殺掉任意 session（免先連回去）。若正在某 pane 開著 → 連 pane 一起收
+  function killSession(id, name) {
+    if (!confirm(`確定殺掉 session「${name || id}」？\nPTY 會結束，所有 attach 的 client（含其他視窗 / wepages iframe）都會斷開。\n殺掉後該 cc 對話的「掛載中」會解除、可重新接續。`)) return;
+    const leaf = sessionToLeaf(id);
+    if (leaf) { closeLeaf(leaf.paneId, true); return; }   // 在 pane 內 → closeLeaf 會 DELETE + 收 pane
+    fetch(API + '/api/sessions/' + encodeURIComponent(id), { method: 'DELETE' })
+      .catch(() => {})
+      .finally(() => { historyCache.clear(); refreshAll(); });
+  }
+
+  function updateStatusbar(leaf) {
+    if (!leaf || !leaf.sessionId) {
+      statusText.textContent = leaf ? '空 pane — 點 sidebar 填入 session' : '未選擇 session';
+      statusText.style.color = '#888';
       metaEl.textContent = '';
       killBtn.style.display = 'none';
       redrawBtn.style.display = 'none';
+      splitHBtn.style.display = leaf ? '' : 'none';
+      splitVBtn.style.display = leaf ? '' : 'none';
       return;
     }
-    const s = pane.info;
-    statusText.textContent = pane.connected
-      ? `${s.name} · connected`
-      : `${s.name} · disconnected`;
-    statusText.style.color = pane.connected ? '#4caf50' : '#f44336';
+    const s = leaf.info || {};
+    statusText.textContent = leaf.connected ? `${s.name} · connected` : `${s.name} · disconnected`;
+    statusText.style.color = leaf.connected ? '#4caf50' : '#f44336';
     const ccTail = s.ccSessionId ? ` · cc:${s.ccSessionId.slice(0, 8)}` : '';
-    metaEl.textContent = `${shorten(s.cwd, 50)} · ${s.cols}x${s.rows}${ccTail}`;
+    metaEl.textContent = `${shorten(s.cwd || '', 50)} · ${s.cols || '?'}x${s.rows || '?'}${ccTail}`;
     killBtn.style.display = '';
     redrawBtn.style.display = '';
+    splitHBtn.style.display = '';
+    splitVBtn.style.display = '';
   }
 
-  function redrawActive() {
-    if (!activeId) return;
-    const pane = panes.get(activeId);
-    if (!pane || !pane.ws || pane.ws.readyState !== WebSocket.OPEN) return;
+  let flashTimer = null;
+  function flashStatus(msg) {
+    statusText.textContent = msg;
+    statusText.style.color = '#d7ba7d';
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => updateStatusbar(leaves.get(focusedPaneId) || null), 1800);
+  }
+
+  function redrawFocused() {
+    const leaf = leaves.get(focusedPaneId);
+    if (!leaf || !leaf.ws || leaf.ws.readyState !== WebSocket.OPEN) return;
     // \x0c = Form Feed = Ctrl+L，cc 收到會重繪 TUI / 清屏
-    pane.ws.send(JSON.stringify({ type: 'input', data: '\x0c' }));
+    leaf.ws.send(JSON.stringify({ type: 'input', data: '\x0c' }));
   }
 
   // ──────────────────────────────────────────────────────────────────────
@@ -523,7 +823,7 @@
       if (!res.ok) throw new Error(json.error || ('HTTP ' + res.status));
       smReset(); smClose();
       await refreshSessions();
-      activate(json.id, json);
+      openSession(json.id, json);
     } catch (err) { sm.err.textContent = err.message; }
     finally { sm.submit.disabled = false; }
   }
@@ -634,18 +934,21 @@
   // Misc bindings
   // ──────────────────────────────────────────────────────────────────────
   killBtn.addEventListener('click', () => {
-    if (!activeId) return;
-    if (!confirm('確定要殺掉這個 session？PTY 會結束，所有 attach 的 client（含其他視窗、wepages iframe）都會斷開。\n\n（只想關掉 tab 的話按上方 tab 的 × 即可，PTY 會保留）')) return;
-    closePane(activeId, true);
+    const leaf = leaves.get(focusedPaneId);
+    if (!leaf || !leaf.sessionId) return;
+    if (!confirm('確定要殺掉這個 session？PTY 會結束，所有 attach 的 client（含其他視窗、wepages iframe）都會斷開。\n\n（只想關掉 pane 的話按 pane 右上的 × 即可，PTY 會保留）')) return;
+    closeLeaf(focusedPaneId, true);
   });
-  redrawBtn.addEventListener('click', redrawActive);
+  redrawBtn.addEventListener('click', redrawFocused);
+  splitHBtn.addEventListener('click', () => splitFocused('row'));
+  splitVBtn.addEventListener('click', () => splitFocused('col'));
 
   // Help modal
   const openHelp = () => { helpModal.classList.add('visible'); };
   const closeHelp = () => { helpModal.classList.remove('visible'); };
   document.getElementById('help-btn').addEventListener('click', openHelp);
   document.getElementById('help-close').addEventListener('click', closeHelp);
-  document.getElementById('help-redraw').addEventListener('click', () => { redrawActive(); closeHelp(); });
+  document.getElementById('help-redraw').addEventListener('click', () => { redrawFocused(); closeHelp(); });
 
   openViewerBtn.addEventListener('click', async () => {
     try {
@@ -691,7 +994,8 @@
     }
   });
 
-  // Tab 切換快捷鍵 (Ctrl+Shift+←/→) — 用 capture 確保 xterm 不先吃掉
+  // Tab / pane 快捷鍵 — 用 capture 確保 xterm 不先吃掉
+  //   Ctrl+Shift+←/→ 切 tab；Ctrl+Shift+D 左右切；Ctrl+Shift+E 上下切；Ctrl+Shift+W 關 pane
   document.addEventListener('keydown', (e) => {
     if (!(e.ctrlKey && e.shiftKey) || e.altKey || e.metaKey) return;
     if (e.code === 'ArrowRight') {
@@ -700,14 +1004,21 @@
     } else if (e.code === 'ArrowLeft') {
       e.preventDefault(); e.stopPropagation();
       switchTabByOffset(-1);
+    } else if (e.code === 'KeyD') {
+      e.preventDefault(); e.stopPropagation();
+      splitFocused('row');
+    } else if (e.code === 'KeyE') {
+      e.preventDefault(); e.stopPropagation();
+      splitFocused('col');
+    } else if (e.code === 'KeyW') {
+      e.preventDefault(); e.stopPropagation();
+      if (focusedPaneId) closeLeaf(focusedPaneId, false);
     }
   }, true);
 
   window.addEventListener('resize', () => {
-    for (const pane of panes.values()) {
-      try { pane.fit.fit(); } catch {}
-      sendResize(pane);
-    }
+    const t = activeTab();
+    if (t) fitTab(t);
   });
 
   // 週期刷新運行中 session 的 metadata；profile 不需高頻
