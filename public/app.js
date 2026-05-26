@@ -115,6 +115,7 @@
           <button class="btn tiny" data-action="resume-last" ${p.lastSessionId && !p.lastSessionBusy ? '' : 'disabled'}>接續上次</button>
           <button class="btn tiny" data-action="edit">編輯</button>
           <button class="btn tiny" data-action="open-folder">歷史目錄</button>
+          <button class="btn danger tiny" data-action="delete">刪除</button>
         </div>
         <div class="history-list" data-history-list>
           <div class="empty">點開項目自動讀取歷史…</div>
@@ -126,6 +127,7 @@
       body.querySelector('[data-action="resume-last"]').addEventListener('click', (e) => { e.stopPropagation(); if (p.lastSessionId) launchProfile(p.id, p.lastSessionId); });
       body.querySelector('[data-action="edit"]').addEventListener('click', (e) => { e.stopPropagation(); openProfileModal(p); });
       body.querySelector('[data-action="open-folder"]').addEventListener('click', (e) => { e.stopPropagation(); openHistoryFolder(p.id); });
+      body.querySelector('[data-action="delete"]').addEventListener('click', (e) => { e.stopPropagation(); deleteProfile(p.id, p.name); });
 
       profileListEl.appendChild(card);
 
@@ -207,6 +209,22 @@
       });
     } catch (err) {
       alert('開啟失敗：' + err.message);
+    }
+  }
+
+  async function deleteProfile(id, name) {
+    if (!confirm(`確定刪除項目「${name}」？\n（只刪除 kabby profile 配置，不會動到 cc 的對話歷史 jsonl，也不影響運行中的 session）`)) return;
+    try {
+      const res = await fetch(API + '/api/profiles/' + encodeURIComponent(id), { method: 'DELETE' });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || ('HTTP ' + res.status));
+      }
+      expandedProfiles.delete(id);
+      historyCache.delete(id);
+      await refreshProfiles();
+    } catch (err) {
+      alert('刪除失敗：' + err.message);
     }
   }
 
@@ -509,7 +527,12 @@
 
   // 遞迴把 tree 畫成 DOM；leaf 重用既有 .el（內含 live xterm）
   function buildNode(node) {
-    if (node.kind === 'leaf') return node.el;
+    if (node.kind === 'leaf') {
+      // 清掉上次 split 留下的 inline flex：root leaf 回退 CSS 預設(flex:1 1 0)撐滿；
+      // 若是 split 子節點，父層 buildNode 會在之後用 applyFlex 覆蓋。
+      node.el.style.flex = '';
+      return node.el;
+    }
     const sp = document.createElement('div');
     sp.className = 'split ' + node.dir;
     node.el = sp;
@@ -909,20 +932,10 @@
 
   async function pmDelete() {
     if (!pm.editingId) return;
-    if (!confirm('確定刪除這個項目？\n（只刪除 kabby profile，不會動到 cc 的對話歷史 jsonl）')) return;
-    try {
-      const res = await fetch(API + '/api/profiles/' + encodeURIComponent(pm.editingId), { method: 'DELETE' });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.error || ('HTTP ' + res.status));
-      }
-      expandedProfiles.delete(pm.editingId);
-      historyCache.delete(pm.editingId);
-      pmClose();
-      await refreshProfiles();
-    } catch (err) {
-      pm.err.textContent = err.message;
-    }
+    const id = pm.editingId;
+    const name = pm.name.value.trim() || id;
+    pmClose();
+    await deleteProfile(id, name);
   }
 
   document.getElementById('new-profile-btn').addEventListener('click', () => openProfileModal(null));
