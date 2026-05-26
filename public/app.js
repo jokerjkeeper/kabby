@@ -438,7 +438,7 @@
     // 這些組合鍵保留給 kabby（切 tab / split / 關 pane），xterm 不處理
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
-        if (['ArrowLeft', 'ArrowRight', 'KeyD', 'KeyE', 'KeyW'].includes(e.code)) return false;
+        if (['ArrowLeft', 'ArrowRight', 'KeyD', 'KeyE', 'KeyW', 'KeyB'].includes(e.code)) return false;
       }
       return true;
     });
@@ -956,6 +956,19 @@
   splitHBtn.addEventListener('click', () => splitFocused('row'));
   splitVBtn.addEventListener('click', () => splitFocused('col'));
 
+  // 側欄收合（toggle）— 狀態存 localStorage；收合後 panes 由 ResizeObserver 自動補滿
+  function setSidebarCollapsed(collapsed) {
+    document.body.classList.toggle('sidebar-collapsed', collapsed);
+    try { localStorage.setItem('kabby-sidebar-collapsed', collapsed ? '1' : '0'); } catch {}
+    const t = activeTab();
+    if (t) fitTab(t);
+  }
+  function toggleSidebar() {
+    setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+  }
+  document.getElementById('sidebar-toggle').addEventListener('click', toggleSidebar);
+  try { if (localStorage.getItem('kabby-sidebar-collapsed') === '1') document.body.classList.add('sidebar-collapsed'); } catch {}
+
   // Help modal
   const openHelp = () => { helpModal.classList.add('visible'); };
   const closeHelp = () => { helpModal.classList.remove('visible'); };
@@ -1026,6 +1039,9 @@
     } else if (e.code === 'KeyW') {
       e.preventDefault(); e.stopPropagation();
       if (focusedPaneId) closeLeaf(focusedPaneId, false);
+    } else if (e.code === 'KeyB') {
+      e.preventDefault(); e.stopPropagation();
+      toggleSidebar();
     }
   }, true);
 
