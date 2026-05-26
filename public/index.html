@@ -495,6 +495,7 @@
       <div id="tab-list"></div>
       <div id="tab-empty">尚無已開啟的 tab — 從左側 sidebar 選 session attach</div>
       <span id="tab-hint">Ctrl+Shift+←/→ 切 tab · D/E 分割 · W 關 pane</span>
+      <button class="btn tiny" id="lock-btn" title="鎖定（清掉本機 token、需重新輸入；不會關閉任何 session）" style="display:none; margin-right:6px">鎖定</button>
       <button class="btn tiny" id="help-btn" title="鍵盤快捷鍵與重繪 (F1)" style="margin-right:8px">?</button>
     </div>
     <div id="statusbar">
@@ -611,6 +612,20 @@
         <button class="btn danger" id="pm-delete" style="display:none; margin-right:auto">刪除</button>
         <button class="btn" id="pm-cancel">取消</button>
         <button class="btn primary" id="pm-submit">儲存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: login (token gate) — daemon 設了 AUTH_TOKEN 時出現；不透明背景遮住終端內容（鎖定用） -->
+  <div class="modal-backdrop" id="login-modal" style="background:#1e1e1e">
+    <div class="modal" style="min-width:380px; max-width:420px">
+      <h2>kabby 已上鎖</h2>
+      <label for="login-token">存取密碼（token）</label>
+      <input id="login-token" type="password" placeholder="輸入 AUTH_TOKEN" autocomplete="current-password" />
+      <div class="hint">此 daemon 設了 AUTH_TOKEN，需輸入正確 token 才能使用。會記在這個瀏覽器（localStorage）。</div>
+      <div class="error" id="login-error"></div>
+      <div class="actions">
+        <button class="btn primary" id="login-submit">進入</button>
       </div>
     </div>
   </div>

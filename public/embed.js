@@ -37,7 +37,8 @@
 
   function connect() {
     setStatus(false, 'connecting…');
-    let url = `ws://${location.host}/ws/${encodeURIComponent(sessionId)}`;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let url = `${proto}//${location.host}/ws/${encodeURIComponent(sessionId)}`;
     if (token) url += '?token=' + encodeURIComponent(token);
     ws = new WebSocket(url);
 

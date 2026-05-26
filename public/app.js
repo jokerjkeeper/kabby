@@ -1,7 +1,25 @@
 /* kabby Web UI — SPA (Phase 2.5 with profiles) */
 (() => {
   const API = '';
-  const WS_BASE = `ws://${location.host}/ws/`;
+  let authToken = localStorage.getItem('kabby-auth-token') || '';
+  let locked = false;            // 鎖定中（已清 token、登入頁蓋著），不關閉 session
+  let authRequired = false;      // daemon 是否設了 AUTH_TOKEN（由 /api/health 得知）
+  // WS URL：依頁面協定選 ws/wss（HTTPS 下必須 wss，否則 mixed-content 被擋），並帶 token
+  function wsUrl(sessionId) {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let u = `${proto}//${location.host}/ws/${encodeURIComponent(sessionId)}`;
+    if (authToken) u += '?token=' + encodeURIComponent(authToken);
+    return u;
+  }
+  // 所有 /api 請求走這裡：注入 token header + 統一 401 處理
+  function apiFetch(path, opts = {}) {
+    const headers = { ...(opts.headers || {}) };
+    if (authToken) headers['X-Kabby-Token'] = authToken;
+    return fetch(API + path, { ...opts, headers }).then((r) => {
+      if (r.status === 401) { showLogin(); throw new Error('unauthorized'); }
+      return r;
+    });
+  }
   document.getElementById('daemon-url').textContent = location.origin;
 
   // ──────────────────────────────────────────────────────────────────────
@@ -69,13 +87,13 @@
   // Profiles
   // ──────────────────────────────────────────────────────────────────────
   async function fetchProfiles() {
-    try { return await fetch(API + '/api/profiles').then((r) => r.json()); }
+    try { return await apiFetch('/api/profiles').then((r) => r.json()); }
     catch { return []; }
   }
 
   async function fetchHistory(profileId) {
     try {
-      const data = await fetch(API + '/api/profiles/' + encodeURIComponent(profileId) + '/history').then((r) => r.json());
+      const data = await apiFetch('/api/profiles/' + encodeURIComponent(profileId) + '/history').then((r) => r.json());
       historyCache.set(profileId, data);
       return data;
     } catch {
@@ -179,7 +197,7 @@
 
   async function launchProfile(profileId, resume) {
     try {
-      const res = await fetch(API + '/api/profiles/' + encodeURIComponent(profileId) + '/launch', {
+      const res = await apiFetch('/api/profiles/' + encodeURIComponent(profileId) + '/launch', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(resume ? { resume } : {}),
@@ -197,12 +215,12 @@
 
   async function openHistoryFolder(profileId) {
     try {
-      const info = await fetch(API + '/api/profiles/' + encodeURIComponent(profileId) + '/history-dir').then((r) => r.json());
+      const info = await apiFetch('/api/profiles/' + encodeURIComponent(profileId) + '/history-dir').then((r) => r.json());
       if (!info.exists) {
         alert('該 cwd 在 cc 還沒有對話歷史目錄。\n預期位置：' + info.dir);
         return;
       }
-      await fetch(API + '/api/viewer/open-folder', {
+      await apiFetch('/api/viewer/open-folder', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ path: info.dir }),
@@ -215,7 +233,7 @@
   async function deleteProfile(id, name) {
     if (!confirm(`確定刪除項目「${name}」？\n（只刪除 kabby profile 配置，不會動到 cc 的對話歷史 jsonl，也不影響運行中的 session）`)) return;
     try {
-      const res = await fetch(API + '/api/profiles/' + encodeURIComponent(id), { method: 'DELETE' });
+      const res = await apiFetch('/api/profiles/' + encodeURIComponent(id), { method: 'DELETE' });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
         throw new Error(json.error || ('HTTP ' + res.status));
@@ -232,8 +250,8 @@
   // Sessions (running)
   // ──────────────────────────────────────────────────────────────────────
   async function fetchSessions() {
-    try { return await fetch(API + '/api/sessions').then((r) => r.json()); }
-    catch { return []; }
+    try { return await apiFetch('/api/sessions').then((r) => r.json()); }
+    catch { return null; }   // null = 抓取失敗（401 / 鎖定 / 網路），別誤判成「沒有 session」而清掉 panes
   }
 
   function renderSessions(sessions) {
@@ -274,7 +292,9 @@
   }
 
   async function refreshSessions() {
+    if (locked) return;                  // 鎖定中：保留現有 panes，WS 照常串流在背後
     const sessions = await fetchSessions();
+    if (!sessions) return;               // 抓取失敗：保留現有 panes，不清空
     renderSessions(sessions);
     const byId = new Map(sessions.map((s) => [s.id, s]));
     for (const leaf of [...leaves.values()]) {
@@ -286,6 +306,7 @@
   }
 
   async function refreshProfiles() {
+    if (locked) return;
     const profiles = await fetchProfiles();
     renderProfiles(profiles);
   }
@@ -474,7 +495,7 @@
   }
 
   function connect(leaf) {
-    const ws = new WebSocket(WS_BASE + encodeURIComponent(leaf.sessionId));
+    const ws = new WebSocket(wsUrl(leaf.sessionId));
     leaf.ws = ws;
     ws.onopen = () => {
       leaf.connected = true;
@@ -732,7 +753,7 @@
   function closeLeaf(paneId, alsoDeleteServer) {
     const sid = removeLeaf(paneId);
     if (alsoDeleteServer && sid) {
-      fetch(API + '/api/sessions/' + encodeURIComponent(sid), { method: 'DELETE' })
+      apiFetch('/api/sessions/' + encodeURIComponent(sid), { method: 'DELETE' })
         .catch(() => {})
         .finally(() => { historyCache.clear(); refreshAll(); });
     } else {
@@ -751,7 +772,7 @@
     if (!confirm(`確定殺掉 session「${name || id}」？\nPTY 會結束，所有 attach 的 client（含其他視窗 / wepages iframe）都會斷開。\n殺掉後該 cc 對話的「掛載中」會解除、可重新接續。`)) return;
     const leaf = sessionToLeaf(id);
     if (leaf) { closeLeaf(leaf.paneId, true); return; }   // 在 pane 內 → closeLeaf 會 DELETE + 收 pane
-    fetch(API + '/api/sessions/' + encodeURIComponent(id), { method: 'DELETE' })
+    apiFetch('/api/sessions/' + encodeURIComponent(id), { method: 'DELETE' })
       .catch(() => {})
       .finally(() => { historyCache.clear(); refreshAll(); });
   }
@@ -837,7 +858,7 @@
     if (args !== undefined) body.args = args;
     sm.submit.disabled = true; sm.err.textContent = '';
     try {
-      const res = await fetch(API + '/api/sessions', {
+      const res = await apiFetch('/api/sessions', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -978,7 +999,7 @@
 
   openViewerBtn.addEventListener('click', async () => {
     try {
-      const res = await fetch(API + '/api/viewer/open', { method: 'POST' });
+      const res = await apiFetch('/api/viewer/open', { method: 'POST' });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
         throw new Error(json.error || ('HTTP ' + res.status));
@@ -1050,10 +1071,68 @@
     if (t) fitTab(t);
   });
 
-  // 週期刷新運行中 session 的 metadata；profile 不需高頻
+  // ──────────────────────────────────────────────────────────────────────
+  // Login (token gate)
+  // ──────────────────────────────────────────────────────────────────────
+  const loginModal = document.getElementById('login-modal');
+  const loginTokenEl = document.getElementById('login-token');
+  const loginErrorEl = document.getElementById('login-error');
+  const lockBtn = document.getElementById('lock-btn');
+
+  function showLogin() {
+    loginModal.classList.add('visible');
+    setTimeout(() => loginTokenEl.focus(), 50);
+  }
+  function hideLogin() { loginModal.classList.remove('visible'); }
+  function updateLockBtn() { lockBtn.style.display = (authRequired && !locked) ? '' : 'none'; }
+
+  // 鎖定：清掉本機 token + 蓋上不透明登入頁。WS 不關、不 DELETE session（PTY 照活）。
+  // 週期刷新被 locked 擋住，所以 panes 不會被清；解鎖後一切照舊。
+  function lock() {
+    locked = true;
+    authToken = '';
+    try { localStorage.removeItem('kabby-auth-token'); } catch {}
+    loginTokenEl.value = '';
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    updateLockBtn();
+    showLogin();
+  }
+  lockBtn.addEventListener('click', lock);
+
+  async function submitLogin() {
+    const val = loginTokenEl.value.trim();
+    if (!val) { loginErrorEl.textContent = '請輸入 token'; return; }
+    // 用受保護的 endpoint 驗證（不走 apiFetch，401 在這裡自訂提示）
+    try {
+      const r = await fetch(API + '/api/sessions', { headers: { 'X-Kabby-Token': val } });
+      if (r.status === 401) { loginErrorEl.textContent = 'token 不正確'; return; }
+      authToken = val;
+      localStorage.setItem('kabby-auth-token', val);
+      loginErrorEl.textContent = '';
+      loginTokenEl.value = '';
+      locked = false;
+      hideLogin();
+      updateLockBtn();
+      refreshAll();
+    } catch (err) {
+      loginErrorEl.textContent = '連線失敗：' + err.message;
+    }
+  }
+  document.getElementById('login-submit').addEventListener('click', submitLogin);
+  loginTokenEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLogin(); });
+
+  // 週期刷新運行中 session 的 metadata；profile 不需高頻（鎖定中各自會 early-return）
   setInterval(refreshSessions, 3000);
   setInterval(refreshProfiles, 10_000);
 
-  // Boot
-  refreshAll();
+  // Boot：先問 daemon 是否需要 token；需要且本機沒存 token → 顯示登入頁
+  async function boot() {
+    let health = {};
+    try { health = await fetch(API + '/api/health').then((r) => r.json()); } catch {}
+    authRequired = !!health.authRequired;
+    updateLockBtn();
+    if (authRequired && !authToken) { showLogin(); return; }
+    refreshAll();   // token 若過期/錯誤，apiFetch 收到 401 會自動 showLogin
+  }
+  boot();
 })();

@@ -9,22 +9,54 @@ const registry = require('./registry');
 const profileStore = require('./profile-store');
 const ccHistory = require('./cc-history');
 
+// 載入專案根目錄的 .env（Node 20.12+ 內建 loadEnvFile，零依賴）；檔案不存在或舊版 node 則略過
+if (typeof process.loadEnvFile === 'function') {
+  try { process.loadEnvFile(path.join(__dirname, '..', '.env')); } catch {}
+}
+
 const PORT = parseInt(process.env.PORT || '3700', 10);
+const HOST = process.env.HOST || '127.0.0.1';
 const AUTH_TOKEN = process.env.AUTH_TOKEN || null;
 const VIEWER_PATH = process.env.KABBY_VIEWER_PATH || null;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+const ALLOWED_ORIGINS = (process.env.KABBY_ALLOWED_ORIGINS || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
+// token 取自：X-Kabby-Token header / Authorization: Bearer <token> / ?token= query
+// AUTH_TOKEN 未設則不鎖（本機開發）
+function tokenOk(req) {
+  if (!AUTH_TOKEN) return true;
+  let t = req.get('x-kabby-token') || req.query.token;
+  if (!t) {
+    const auth = req.get('authorization');
+    if (auth) t = auth.replace(/^Bearer\s+/i, '').trim();
+  }
+  return t === AUTH_TOKEN;
+}
 
 const app = express();
-app.use(cors({ origin: true, credentials: false }));
+app.use(cors({
+  origin: ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : true,   // 未設白名單 = 放行全部（本機開發）
+  allowedHeaders: ['Content-Type', 'X-Kabby-Token', 'Authorization'],
+  credentials: false,
+}));
 app.use(express.json({ limit: '1mb' }));
 
+// 開放：liveness + 讓前端判斷是否需要登入（不需 token）
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
+    authRequired: !!AUTH_TOKEN,
     sessions: registry.list().length,
     profiles: profileStore.list().length,
     viewerConfigured: !!(VIEWER_PATH && fs.existsSync(VIEWER_PATH)),
   });
+});
+
+// 其餘 /api/* 一律要 token（health 已在上面先處理，不受影響）
+app.use('/api', (req, res, next) => {
+  if (tokenOk(req)) return next();
+  res.status(401).json({ error: 'unauthorized' });
 });
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -255,9 +287,9 @@ function handleConnection(ws, session) {
   });
 }
 
-httpServer.listen(PORT, () => {
-  console.log(`kabby daemon listening on http://localhost:${PORT}`);
-  if (AUTH_TOKEN) console.log('[auth] AUTH_TOKEN enabled');
+httpServer.listen(PORT, HOST, () => {
+  console.log(`kabby daemon listening on http://${HOST}:${PORT}`);
+  console.log(AUTH_TOKEN ? '[auth] AUTH_TOKEN enabled — /api + WS 需要 token' : '[auth] AUTH_TOKEN 未設 — 不鎖（僅適合本機）');
 });
 
 process.on('SIGINT', shutdown);

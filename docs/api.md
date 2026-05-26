@@ -4,17 +4,35 @@ Phase 1 提供 HTTP REST + 單一 WebSocket endpoint。所有路徑相對於 dae
 
 ## 認證
 
-未設 `AUTH_TOKEN` env：所有請求免認證。
-設了 `AUTH_TOKEN=xxx`：
+由 env `AUTH_TOKEN` 控制（建議透過專案根目錄 `.env`，daemon 啟動時自動載入；見 `.env.example`）。
 
-- HTTP：v1 **不檢查**（只在 WS 檢查）
-- WS：連線時必須帶 `?token=xxx`，否則 401
+- **未設 `AUTH_TOKEN`**：所有請求免認證（本機開發）。
+- **設了 `AUTH_TOKEN=xxx`**：
+  - **HTTP `/api/*`**（`/api/health` 除外）：每個請求需帶 token，否則回 `401 { "error": "unauthorized" }`。token 放在 **`X-Kabby-Token` header** 或 **`?token=xxx` query** 皆可。
+  - **WebSocket**：連線 URL 帶 `?token=xxx`，否則 401。
+  - `/api/health`：永遠開放（liveness + 回報是否需要認證）。
 
-> v1 範圍：本機開發為主。如要對外公開，請放在 reverse proxy 後面加 TLS + auth。
+> 部署：kabby 預設綁 `127.0.0.1`（env `HOST` 可改）。對外請以 Cloudflare Tunnel / reverse proxy 提供 TLS，token 在 TLS 上傳輸不會明文外洩。
 
 ## CORS
 
-`Access-Control-Allow-Origin: *`（透過 `cors` middleware），方便 wepages 任務頁 iframe 跨來源呼叫。
+由 env `KABBY_ALLOWED_ORIGINS`（逗號分隔白名單）控制：
+
+- **未設**：放行所有來源（`origin: *`，本機開發方便）。
+- **有設**：只放行清單內 origin（例：`http://localhost:5002,http://127.0.0.1:5002`，給本機 wepages 跨來源呼叫 `/api/*`）。
+
+允許的自訂 header：`Content-Type`、`X-Kabby-Token`。
+
+## 給 wepages 串接的重點
+
+wepages 以 iframe 嵌 kabby 終端，並打 `/api/sessions` 取 session 列表。當 kabby 設了 `AUTH_TOKEN`（遠端部署）時：
+
+1. **session 列表**：`GET <server>/api/sessions` 要帶 `X-Kabby-Token` header 或 `?token=`。
+2. **iframe 掛載**：`<server>/embed.html?session=<id|name>&token=<token>`（`embed.js` 用 `?token=` 連 WS）。
+3. **遠端 URL** 用 `https://kabby.網域`（**無 port**，Cloudflare 對外 443）；本機用 `http://localhost:3700`。
+4. 可先打 `GET /api/health` 看 `authRequired`，決定要不要附 token。
+
+本機 kabby（沒設 `AUTH_TOKEN`）則以上 token 都可省略。
 
 ---
 
@@ -25,8 +43,10 @@ Phase 1 提供 HTTP REST + 單一 WebSocket endpoint。所有路徑相對於 dae
 健康檢查，順便回 session / profile 總數與 viewer 配置狀態。
 
 ```json
-{ "ok": true, "sessions": 3, "profiles": 5, "viewerConfigured": true }
+{ "ok": true, "authRequired": true, "sessions": 3, "profiles": 5, "viewerConfigured": true }
 ```
+
+`authRequired`：daemon 是否設了 `AUTH_TOKEN`。前端 / wepages 可據此決定是否要帶 token。**此 endpoint 不需 token。**
 
 ### `GET /api/sessions`
 
@@ -193,7 +213,9 @@ Request body：
 
 ## WebSocket
 
-### `ws://localhost:3700/ws/:id`
+### `ws://localhost:3700/ws/:id`（HTTPS 下用 `wss://`）
+
+> 頁面若以 `https://` 載入（例：經 Cloudflare Tunnel），WS 必須改用 `wss://`，否則被瀏覽器當 mixed-content 擋掉。kabby 前端與 `embed.js` 已依 `location.protocol` 自動切換。
 
 `:id` 可填 UUID 或 name。連上之後：
 
