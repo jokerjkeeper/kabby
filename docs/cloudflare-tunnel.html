@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>kabby × Cloudflare Tunnel 部署教學</title>
+<style>
+  :root {
+    --bg: #1e1e1e; --fg: #d4d4d4; --muted: #888; --accent: #4ec9b0;
+    --blue: #0e639c; --card: #252526; --border: #333; --code-bg: #161616;
+    --warn-bg: #3a2d12; --warn-border: #6b5320; --warn-fg: #f0d48a;
+    --danger-bg: #3a1d18; --danger-border: #6b2d22; --danger-fg: #f0a08a;
+    --ok-bg: #15301f; --ok-border: #2c5a3a; --ok-fg: #8fe0a8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 15px; line-height: 1.65;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 28px; margin: 0 0 6px; color: #fff; }
+  h1 .accent { color: var(--accent); }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+  h2 {
+    font-size: 20px; margin: 40px 0 12px; color: #fff;
+    border-bottom: 1px solid var(--border); padding-bottom: 8px;
+  }
+  h2 .step { color: var(--accent); font-family: 'Cascadia Code', Consolas, monospace; margin-right: 8px; }
+  h3 { font-size: 16px; margin: 22px 0 8px; color: #f0f0f0; }
+  p { margin: 10px 0; }
+  a { color: var(--accent); }
+  code {
+    background: var(--code-bg); padding: 2px 6px; border-radius: 3px;
+    font-family: 'Cascadia Code', Consolas, monospace; font-size: 13px; color: #e0c98a;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 14px 16px; overflow-x: auto; margin: 12px 0;
+  }
+  pre code { background: none; padding: 0; color: #d4d4d4; font-size: 13px; }
+  ol, ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 4px 20px 16px; margin: 16px 0;
+  }
+  .callout {
+    border-radius: 6px; padding: 12px 16px; margin: 16px 0; font-size: 14px;
+    border: 1px solid; border-left-width: 4px;
+  }
+  .callout b { display: block; margin-bottom: 4px; }
+  .warn { background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn-fg); }
+  .danger { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger-fg); }
+  .ok { background: var(--ok-bg); border-color: var(--ok-border); color: var(--ok-fg); }
+  .diagram {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 16px; font-family: 'Cascadia Code', Consolas, monospace; font-size: 12.5px;
+    color: var(--muted); white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  th { background: var(--card); color: #f0f0f0; }
+  .pill {
+    display: inline-block; background: var(--blue); color: #fff; font-size: 11px;
+    padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle;
+  }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 36px 0; }
+  .foot { color: var(--muted); font-size: 13px; margin-top: 40px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>kabby × <span class="accent">Cloudflare Tunnel</span> 部署教學</h1>
+  <p class="sub">把 GCP 上的 kabby 安全地暴露到 <code>https://kabby.你的網域.com</code>，免開任何對外 port、TLS 自動、token 當密碼。</p>
+
+  <div class="card">
+    <h3>這份教學會達成什麼</h3>
+    <div class="diagram">瀏覽器 / 本機 wepages
+        │  https (443)
+        ▼
+┌──────────────────────┐
+│  Cloudflare (TLS 終止)  │
+└──────────┬───────────┘
+        │  加密的出站隧道（GCP 主動連出，無 inbound port）
+        ▼
+   cloudflared（跑在 GCP）
+        │  http://localhost:3700
+        ▼
+   kabby daemon（綁 127.0.0.1，用 AUTH_TOKEN 擋）</div>
+    <p style="margin-bottom:0">重點：GCP <b>不用開任何 inbound 防火牆</b>，cloudflared 是主動往 Cloudflare 連出去。kabby 只聽 <code>127.0.0.1</code>，唯一入口是通過 Cloudflare 的隧道。</p>
+  </div>
+
+  <h2>前置需求</h2>
+  <ol>
+    <li>一個 <b>Cloudflare 帳號</b>（免費方案即可）</li>
+    <li>一個掛在 Cloudflare 上的<b>網域</b>：在 Cloudflare 後台 <em>Add a site</em> 加入你的網域，再到你的網域註冊商把 nameserver 改成 Cloudflare 提供的兩個 NS，等生效。</li>
+    <li>一台能 SSH 進去的 <b>GCP server</b>（Linux，以下以 Debian/Ubuntu 為例）</li>
+    <li>kabby 已能在該 server 上 <code>npm start</code> 跑起來（聽 <code>127.0.0.1:3700</code>，且 <code>.env</code> 裡設了 <code>AUTH_TOKEN</code>）</li>
+  </ol>
+  <div class="callout warn">
+    <b>沒有網域怎麼辦？</b>
+    可以先跳到最後的「<a href="#try">快速測試（免網域）</a>」用 TryCloudflare 拿一個臨時網址驗證，確認可行再買網域做正式部署。
+  </div>
+
+  <h2><span class="step">A</span>在 Cloudflare 後台建立 Tunnel</h2>
+  <ol>
+    <li>登入 Cloudflare Dashboard → 左側 <b>Zero Trust</b></li>
+    <li><b>Networks → Tunnels → Create a tunnel</b></li>
+    <li>連線器類型選 <b>Cloudflared</b> → 取個名字（例如 <code>kabby</code>）→ <b>Save tunnel</b></li>
+    <li>畫面會給你一段<b>含 token 的安裝指令</b>（依作業系統不同）。先把那串 token 複製起來，下一步會用到。</li>
+  </ol>
+
+  <h2><span class="step">B</span>在 GCP server 安裝並啟動 cloudflared</h2>
+  <p>SSH 進 GCP，安裝 cloudflared（Debian/Ubuntu 直接抓官方 .deb 最省事）：</p>
+  <pre><code>curl -L --output cloudflared.deb \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared.deb</code></pre>
+  <p>接著把後台給你的安裝指令貼上 —— 它會把 cloudflared 裝成<b>開機自啟的 systemd service</b>並連回 Cloudflare：</p>
+  <pre><code>sudo cloudflared service install &lt;後台給你的TOKEN&gt;</code></pre>
+  <p>確認服務有跑：</p>
+  <pre><code>sudo systemctl status cloudflared
+# 看 log： sudo journalctl -u cloudflared -f</code></pre>
+  <div class="callout ok">
+    <b>回後台看連線狀態</b>
+    回到 Tunnels 頁面，剛建的 tunnel 狀態應該變成 <b>HEALTHY</b>，代表 GCP 的 cloudflared 已連上 Cloudflare。
+  </div>
+
+  <h2><span class="step">C</span>設定 Public Hostname（路由到 kabby）</h2>
+  <ol>
+    <li>在該 tunnel 的設定頁 → <b>Public Hostname</b> 分頁 → <b>Add a public hostname</b></li>
+    <li>填寫：
+      <table>
+        <tr><th>欄位</th><th>填什麼</th></tr>
+        <tr><td>Subdomain</td><td><code>kabby</code></td></tr>
+        <tr><td>Domain</td><td>選你的網域 → 對外即 <code>kabby.你的網域.com</code></td></tr>
+        <tr><td>Service · Type</td><td><b>HTTP</b></td></tr>
+        <tr><td>Service · URL</td><td><code>localhost:3700</code></td></tr>
+      </table>
+    </li>
+    <li><b>Save</b></li>
+  </ol>
+  <div class="callout ok">
+    <b>完成</b>
+    打開 <code>https://kabby.你的網域.com</code> 就會通到 GCP 上的 kabby，HTTPS 憑證由 Cloudflare 自動處理。WebSocket（kabby 終端串流）Cloudflare Tunnel 預設就支援，不用額外設定。
+  </div>
+
+  <h2>安全檢查清單</h2>
+  <div class="callout danger">
+    <b>務必設 AUTH_TOKEN</b>
+    kabby 會啟動帶 <code>--dangerously-skip-permissions</code> 的 Claude Code —— 沒設 token 等於把一個可任意執行指令的 shell 開放給所有知道網址的人。<code>.env</code> 一定要設 <code>AUTH_TOKEN</code>。
+  </div>
+  <ul>
+    <li><b>GCP 防火牆不用開 3700</b>（也不用開任何 inbound）—— cloudflared 是 outbound 連出。若先前有開過 3700 的規則，建議移除。</li>
+    <li>kabby 綁 <code>127.0.0.1</code>（預設）→ 只有同機的 cloudflared 連得到。<b>不要</b>設 <code>HOST=0.0.0.0</code>。</li>
+    <li>產生強 token：<code>node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"</code></li>
+    <li>跨域給本機 wepages 用的話，<code>.env</code> 設 <code>KABBY_ALLOWED_ORIGINS=http://localhost:5002,http://127.0.0.1:5002</code></li>
+  </ul>
+
+  <h2>讓 kabby 本體常駐</h2>
+  <p>cloudflared 已是 service，但 kabby daemon 也要常駐（不能只靠 SSH session 裡的 <code>npm start</code>，斷線就停）。請見另一份教學把 kabby 設成 systemd service：</p>
+  <pre><code>docs/deploy-systemd.md</code></pre>
+
+  <hr />
+
+  <h2 id="try">快速測試（免網域、免後台）<span class="pill">臨時</span></h2>
+  <p>想先確認 kabby 經過 https / wss / token 通不通，一行就好（在 GCP 上跑）：</p>
+  <pre><code>cloudflared tunnel --url http://localhost:3700</code></pre>
+  <p>它會吐一個隨機網址，例如 <code>https://random-words.trycloudflare.com</code>，立刻可用瀏覽器或 wepages 測試。</p>
+  <div class="callout warn">
+    <b>只適合臨時測試</b>
+    每次重啟 cloudflared 網址都會換、且沒有正式 SLA。確認可行後，請走上面 A→C 的正式流程。
+  </div>
+
+  <p class="foot">本教學對應 kabby 部署前認證強化（token / ws→wss / 綁 localhost / CORS 白名單）。API 細節見 <code>docs/api.md</code>。</p>
+
+</div>
+</body>
+</html>

@@ -937,11 +937,11 @@
     if (args !== undefined) body.args = args;
     pm.submit.disabled = true; pm.err.textContent = '';
     try {
-      const url = pm.editingId
-        ? API + '/api/profiles/' + encodeURIComponent(pm.editingId)
-        : API + '/api/profiles';
+      const path = pm.editingId
+        ? '/api/profiles/' + encodeURIComponent(pm.editingId)
+        : '/api/profiles';
       const method = pm.editingId ? 'PUT' : 'POST';
-      const res = await fetch(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await apiFetch(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || ('HTTP ' + res.status));
       pmClose();
