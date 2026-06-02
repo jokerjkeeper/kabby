@@ -1,0 +1,31 @@
+{
+  "name": "kabby-desktop",
+  "version": "0.1.0",
+  "description": "kabby 桌面 client — 一個指向 daemon 的視窗，等同 web UI 的 attach client",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.kabby.desktop",
+    "productName": "kabby",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "config.js"
+    ],
+    "win": {
+      "target": "portable"
+    },
+    "portable": {
+      "artifactName": "kabby.exe"
+    }
+  }
+}
