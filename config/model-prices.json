@@ -1,0 +1,12 @@
+{
+  "_about": "共用 model 定價（進 git，三機同步）。每機可在 ~/.kabby/model-prices.json 放覆寫檔。USD per 1M tokens；只填 input/output 即可，cache 費率自動推導(5m=1.25x, 1h=2x, read=0.1x)，要精確可加 cacheWrite5m/cacheWrite1h/cacheRead 覆寫。",
+  "version": 1,
+  "currency": "USD",
+  "perMillion": {
+    "claude-fable-5": { "input": 10, "output": 50 },
+    "claude-opus-4-8": { "input": 5, "output": 25 },
+    "claude-opus-4-7": { "input": 5, "output": 25 },
+    "claude-sonnet-4-6": { "input": 3, "output": 15 },
+    "claude-haiku-4-5": { "input": 1, "output": 5 }
+  }
+}

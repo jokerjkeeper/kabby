@@ -135,4 +135,8 @@ module.exports = {
   encodeCwd,
   projectDir,
   listHistory,
+  // 供 cc-collector 複用的文字解析 helper
+  extractText,
+  stripTags,
+  shorten,
 };

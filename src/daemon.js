@@ -8,6 +8,8 @@ const { WebSocketServer } = require('ws');
 const registry = require('./registry');
 const profileStore = require('./profile-store');
 const ccHistory = require('./cc-history');
+const ccCollector = require('./cc-collector');
+const usageWatcher = require('./usage-watcher');
 
 // 載入專案根目錄的 .env（Node 20.12+ 內建 loadEnvFile，零依賴）；檔案不存在或舊版 node 則略過
 if (typeof process.loadEnvFile === 'function') {
@@ -228,8 +230,58 @@ app.post('/api/sessions/:id/input', (req, res) => {
   if (!session) return res.status(404).json({ error: 'not found' });
   const { data } = req.body || {};
   if (typeof data !== 'string') return res.status(400).json({ error: 'data must be string' });
-  const ok = session.write(data);
-  res.json({ ok });
+  const r = session.write(data);
+  res.json({ ok: r.ok, blocked: r.blocked });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Usage 監控（B 方案：cc JSONL 增量採集，pull 式：請求時掃描 + 回聚合）
+// 索引存 ~/.kabby/usage-index.json（衍生快取，不進 git）。詳見 cc-collector.js。
+// ──────────────────────────────────────────────────────────────────────────
+
+// GET /api/usage                 → 只讀索引（背景 watcher 已維護），回聚合
+// GET /api/usage?cwd=D:\Git\xxx  → 同上但只回該 project
+// GET /api/usage?refresh=1       → 強制立刻增量掃一次再回（手動刷新）
+// GET /api/usage?rebuild=1       → 砍索引從頭全掃（套用新敏感詞庫到既有歷史，較重）
+app.get('/api/usage', (req, res) => {
+  try {
+    const cwd = req.query.cwd ? ccHistory.normalizeCwd(req.query.cwd) : null;
+    const filter = cwd ? { cwd } : undefined;
+    let view;
+    if (req.query.rebuild === '1') {
+      view = ccCollector.rebuildAll();
+      if (cwd) view = ccCollector.view(filter);
+    } else if (req.query.refresh === '1') {
+      view = cwd ? ccCollector.scanProject(cwd) : ccCollector.scanAll();
+    } else {
+      view = ccCollector.view(filter);
+    }
+    res.json(view);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/usage/sensitive          → 所有 session 的敏感詞命中（攤平、時間新→舊）
+// GET /api/usage/sensitive?cwd=...   → 只回該 project
+app.get('/api/usage/sensitive', (req, res) => {
+  try {
+    const cwd = req.query.cwd ? ccHistory.normalizeCwd(req.query.cwd) : null;
+    res.json(ccCollector.sensitiveHits(cwd ? { cwd } : undefined));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/usage/:sessionId/conversation → 按需從原檔讀完整對話（不存索引）
+app.get('/api/usage/:sessionId/conversation', async (req, res) => {
+  try {
+    const convo = await ccCollector.readConversation(req.params.sessionId);
+    if (!convo) return res.status(404).json({ error: 'session jsonl not found' });
+    res.json(convo);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Static UI — mount after /api/* so API routes win
@@ -238,8 +290,35 @@ app.use(express.static(PUBLIC_DIR));
 const httpServer = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
+// 監控頁即時推送：watcher 每次掃描後廣播聚合 view 給這些 client
+const usageClients = new Set();
+function broadcastUsage(view) {
+  if (!usageClients.size) return;
+  const msg = JSON.stringify({ type: 'usage', ...view });
+  for (const ws of usageClients) {
+    if (ws.readyState === ws.OPEN) ws.send(msg);
+  }
+}
+usageWatcher.setOnScan(broadcastUsage);
+
 httpServer.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
+
+  // 監控即時串流（與 per-session 終端 WS 區隔）
+  if (url.pathname === '/api/usage/stream') {
+    if (AUTH_TOKEN && url.searchParams.get('token') !== AUTH_TOKEN) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      usageClients.add(ws);
+      ws.on('close', () => usageClients.delete(ws));
+      ws.on('error', () => usageClients.delete(ws));
+    });
+    return;
+  }
+
   const match = url.pathname.match(/^\/ws\/([^/]+)$/);
   if (!match) {
     socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
@@ -290,12 +369,15 @@ function handleConnection(ws, session) {
 httpServer.listen(PORT, HOST, () => {
   console.log(`kabby daemon listening on http://${HOST}:${PORT}`);
   console.log(AUTH_TOKEN ? '[auth] AUTH_TOKEN enabled — /api + WS 需要 token' : '[auth] AUTH_TOKEN 未設 — 不鎖（僅適合本機）');
+  // 背景採集：監看 cc JSONL，檔案一變就增量入庫（B 方案常駐採集）
+  usageWatcher.start();
 });
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 function shutdown() {
   console.log('\n[kabby] shutting down...');
+  usageWatcher.stop();
   for (const s of registry.list()) {
     const session = registry.get(s.id);
     if (session) session.kill();

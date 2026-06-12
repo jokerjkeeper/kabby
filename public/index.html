@@ -454,6 +454,89 @@
       color: #d4d4d4;
     }
     #help-btn { font-weight: bold; font-size: 13px; min-width: 22px; line-height: 18px; padding: 0 6px; }
+
+    /* ── 監控頁（modal overlay）─────────────────────────────────────── */
+    .modal.monitor {
+      min-width: 0; width: 92vw; max-width: 1200px; height: 88vh;
+      display: flex; flex-direction: column; padding: 16px 18px;
+    }
+    .monitor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .monitor-head h2 { margin: 0; }
+    .monitor-head h2 small { color: #888; font-weight: 400; font-size: 11px; margin-left: 8px; }
+    .monitor-actions { display: flex; gap: 6px; }
+    .monitor-totals {
+      display: flex; flex-wrap: wrap; gap: 18px; margin: 12px 0; padding: 10px 14px;
+      background: #252526; border: 1px solid #333; border-radius: 4px;
+    }
+    .monitor-totals .stat { display: flex; flex-direction: column; gap: 2px; }
+    .monitor-totals .stat .k { color: #888; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+    .monitor-totals .stat .v { color: #f0f0f0; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .monitor-totals .stat .v.warn { color: #ffd97a; }
+    .monitor-totals .stat .v.cost { color: #6cc04a; }
+    table.mon-table td.mon-cost { color: #6cc04a; }
+    .monitor-tabs { display: flex; gap: 4px; border-bottom: 1px solid #333; }
+    .mon-tab {
+      background: transparent; border: 0; color: #888; padding: 8px 14px;
+      cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent;
+    }
+    .mon-tab:hover { color: #ccc; }
+    .mon-tab.active { color: #fff; border-bottom-color: #4ec9b0; }
+    .monitor-body { flex: 1; overflow-y: auto; margin-top: 10px; }
+    .mon-view { display: none; }
+    .mon-view.active { display: block; }
+    table.mon-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    table.mon-table th {
+      text-align: left; color: #888; font-weight: 500; font-size: 11px;
+      padding: 6px 8px; border-bottom: 1px solid #333;
+      position: sticky; top: 0; background: #2d2d2d; z-index: 1;
+    }
+    table.mon-table td { padding: 6px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top; }
+    table.mon-table tr.sess-row { cursor: pointer; }
+    table.mon-table tr.sess-row:hover { background: #2a2d2e; }
+    table.mon-table td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: 'Cascadia Code', Consolas, monospace; }
+    .mon-summary { color: #d4d4d4; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mon-model { color: #9cdcfe; font-size: 11px; }
+    .mon-sw-count { color: #ffd97a; font-weight: 600; }
+    .mon-convo .turn { padding: 6px 10px; border-bottom: 1px solid #262626; }
+    .mon-convo .turn .role { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #888; }
+    .mon-convo .turn.user .role { color: #4ec9b0; }
+    .mon-convo .turn.assistant .role { color: #9cdcfe; }
+    .mon-convo .turn .text { color: #d4d4d4; white-space: pre-wrap; word-break: break-word; margin-top: 2px; max-height: 220px; overflow: auto; }
+    .mon-hit { padding: 6px 8px; border-bottom: 1px solid #2a2a2a; display: flex; gap: 10px; align-items: baseline; font-size: 12px; }
+    .mon-hit .word { color: #ffd97a; font-weight: 600; font-family: 'Cascadia Code', Consolas, monospace; flex: 0 0 auto; }
+    .mon-hit .role { color: #888; font-size: 10px; flex: 0 0 auto; }
+    .mon-hit .snippet { color: #bbb; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mon-hit .where { color: #666; font-size: 10px; flex: 0 0 auto; }
+    .mon-empty { color: #666; padding: 24px; text-align: center; }
+    .mon-live {
+      font-size: 11px; color: #4caf50; margin-left: 10px; font-weight: 600;
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .mon-live.on { opacity: 1; }
+    .mon-live.pulse { animation: monpulse 0.6s ease; }
+    @keyframes monpulse { 0% { color: #8effa0; } 100% { color: #4caf50; } }
+    /* charts */
+    .chart-block { margin-bottom: 22px; }
+    .chart-block h3 { font-size: 12px; color: #aaa; font-weight: 600; margin-bottom: 8px; }
+    .bar-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; font-size: 12px; }
+    .bar-label { flex: 0 0 150px; color: #ccc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bar-track { flex: 1 1 auto; height: 16px; background: #232323; border-radius: 3px; overflow: hidden; }
+    .bar-fill { display: block; height: 100%; border-radius: 3px; min-width: 2px; transition: width 0.3s; }
+    .bar-val { flex: 0 0 auto; color: #aaa; font-variant-numeric: tabular-nums; font-family: 'Cascadia Code', Consolas, monospace; min-width: 120px; text-align: right; }
+    /* toast */
+    #toast-host {
+      position: fixed; right: 16px; bottom: 16px; z-index: 300;
+      display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+      pointer-events: none;
+    }
+    .toast {
+      background: #2d2d2d; border: 1px solid #444; border-left: 3px solid #888;
+      border-radius: 4px; padding: 10px 14px; font-size: 12px; color: #ddd;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5); max-width: 420px;
+      opacity: 1; transform: translateY(0); transition: opacity 0.3s, transform 0.3s;
+    }
+    .toast.warn { border-left-color: #d7913a; color: #ffd9a8; background: #2e2620; }
+    .toast.out { opacity: 0; transform: translateY(8px); }
   </style>
 </head>
 <body>
@@ -495,6 +578,7 @@
       <div id="tab-list"></div>
       <div id="tab-empty">尚無已開啟的 tab — 從左側 sidebar 選 session attach</div>
       <span id="tab-hint">Ctrl+Shift+←/→ 切 tab · D/E 分割 · W 關 pane</span>
+      <button class="btn tiny" id="monitor-btn" title="監控：token 用量 / 對話 / 敏感詞" style="margin-right:6px">監控</button>
       <button class="btn tiny" id="lock-btn" title="鎖定（清掉本機 token、需重新輸入；不會關閉任何 session）" style="display:none; margin-right:6px">鎖定</button>
       <button class="btn tiny" id="help-btn" title="鍵盤快捷鍵與重繪 (F1)" style="margin-right:8px">?</button>
     </div>
@@ -629,6 +713,33 @@
       </div>
     </div>
   </div>
+
+  <!-- Modal: 監控（token 用量 / 對話 / 敏感詞，唯讀 pull 式） -->
+  <div class="modal-backdrop" id="monitor-modal">
+    <div class="modal monitor">
+      <div class="monitor-head">
+        <h2>監控 <small id="mon-updated"></small> <span id="mon-live" class="mon-live" title="背景 watcher 即時推送中">● live</span></h2>
+        <div class="monitor-actions">
+          <button class="btn" id="mon-refresh" title="重讀索引（背景 watcher 已持續採集）">重新整理</button>
+          <button class="btn" id="mon-rebuild" title="砍索引從頭全掃，套用目前敏感詞庫/定價到既有歷史（資料量大時較久）">重審歷史</button>
+          <button class="btn" id="mon-close">關閉</button>
+        </div>
+      </div>
+      <div class="monitor-totals" id="mon-totals"></div>
+      <div class="monitor-tabs">
+        <button class="mon-tab active" data-view="usage">Token 用量</button>
+        <button class="mon-tab" data-view="dash">儀表板</button>
+        <button class="mon-tab" data-view="sensitive">敏感詞 <span id="mon-sw-badge" class="badge warn" style="display:none"></span></button>
+      </div>
+      <div class="monitor-body">
+        <div id="mon-usage" class="mon-view active"></div>
+        <div id="mon-dash" class="mon-view"></div>
+        <div id="mon-sensitive" class="mon-view"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-host"></div>
 
   <script src="https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js"></script>
   <script src="https://unpkg.com/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>

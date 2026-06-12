@@ -1,0 +1,16 @@
+{
+  "_about": "共用敏感詞庫（進 git，三機同步）。每機可在 ~/.kabby/sensitive-words.json 放覆寫檔。words=字面比對(不分大小寫含子字串)，patterns=正規表達式(i)。blockInput=是否在輸入時即時攔截(命中不送進 cc)。",
+  "version": 1,
+  "words": [
+    "password",
+    "passwd",
+    "密碼",
+    "信用卡",
+    "身分證"
+  ],
+  "patterns": [
+    "sk-[A-Za-z0-9]{20,}",
+    "AKIA[0-9A-Z]{16}"
+  ],
+  "blockInput": false
+}

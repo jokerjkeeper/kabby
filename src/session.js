@@ -2,6 +2,10 @@ const pty = require('node-pty');
 const { randomUUID } = require('crypto');
 const { EventEmitter } = require('events');
 const RingBuffer = require('./ring-buffer');
+const sensitive = require('./sensitive');
+const { createInputFilter } = require('./input-filter');
+
+const INPUT_MATCHER_TTL = 3000; // 敏感詞 matcher 快取（避免每個 keystroke 都讀檔）
 
 const IS_WINDOWS = process.platform === 'win32';
 // Windows 上 npm 全局 CLI 是 .cmd shim，沒 .exe。node-pty 能直接 spawn .cmd。
@@ -21,6 +25,11 @@ class Session extends EventEmitter {
     this.alive = true;
     this.exitCode = null;
     this.profileId = profileId;
+
+    // D 方案：輸入即時攔截（組行 + 敏感詞比對）。matcher 快取，每 3s 重讀設定。
+    this._inputFilter = createInputFilter();
+    this._inputMatcher = null;
+    this._inputMatcherAt = 0;
 
     const spawnCmd = cmd || DEFAULT_CMD;
     const spawnArgs = args || ['--dangerously-skip-permissions'];
@@ -69,10 +78,32 @@ class Session extends EventEmitter {
     this.clients.delete(ws);
   }
 
+  // 取（快取的）輸入攔截 matcher；blockInput 關閉時回 null
+  _getInputMatcher() {
+    const now = Date.now();
+    if (now - this._inputMatcherAt > INPUT_MATCHER_TTL) {
+      const cfg = sensitive.load();
+      this._inputMatcher = cfg.blockInput ? sensitive.buildMatcher(cfg) : null;
+      this._inputMatcherAt = now;
+    }
+    return this._inputMatcher;
+  }
+
+  // 回傳 { ok, blocked:[...] }。攔截命中時不送進 cc，並廣播 blocked 給 clients。
   write(data) {
-    if (!this.alive) return false;
-    this.proc.write(data);
-    return true;
+    if (!this.alive) return { ok: false, blocked: [] };
+    const matcher = this._getInputMatcher();
+    if (!matcher) {
+      this.proc.write(data);
+      return { ok: true, blocked: [] };
+    }
+    const { forward, blockedWords } = this._inputFilter.feed(data, matcher);
+    if (forward) this.proc.write(forward);
+    if (blockedWords.length) {
+      this._broadcast({ type: 'blocked', words: blockedWords, ts: new Date().toISOString() });
+      return { ok: false, blocked: blockedWords };
+    }
+    return { ok: true, blocked: [] };
   }
 
   resize(cols, rows) {

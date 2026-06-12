@@ -507,6 +507,9 @@
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       if (msg.type === 'output') { if (leaf.term) leaf.term.write(msg.data); }
+      else if (msg.type === 'blocked') {
+        showToast('⚠ 輸入含敏感詞「' + (msg.words || []).join('、') + '」，已攔截未送出', 'warn');
+      }
       else if (msg.type === 'exit') {
         if (leaf.term) leaf.term.write(`\r\n\x1b[33m[session exited code=${msg.code}]\x1b[0m\r\n`);
         leaf.connected = false;
@@ -520,6 +523,17 @@
       renderTabs();
     };
     ws.onerror = () => { try { ws.close(); } catch {} };
+  }
+
+  // 輕量 toast（敏感詞攔截提示等）
+  function showToast(text, kind) {
+    const host = document.getElementById('toast-host');
+    if (!host) return;
+    const el = document.createElement('div');
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.textContent = text;
+    host.appendChild(el);
+    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, 4000);
   }
 
   function sendResize(leaf) {
@@ -1011,12 +1025,14 @@
 
   // Modal 鍵盤 (ESC / Enter) — modal 開啟時優先處理
   document.addEventListener('keydown', (e) => {
-    const inModal = sm.modal.classList.contains('visible') || pm.modal.classList.contains('visible') || helpModal.classList.contains('visible');
+    const monModalEl = document.getElementById('monitor-modal');
+    const inModal = sm.modal.classList.contains('visible') || pm.modal.classList.contains('visible') || helpModal.classList.contains('visible') || monModalEl.classList.contains('visible');
     if (!inModal) return;
     if (e.key === 'Escape') {
       if (sm.modal.classList.contains('visible')) smClose();
       if (pm.modal.classList.contains('visible')) pmClose();
       if (helpModal.classList.contains('visible')) closeHelp();
+      if (monModalEl.classList.contains('visible')) monModalEl.classList.remove('visible');
     } else if (e.key === 'Enter') {
       if (sm.modal.classList.contains('visible')) smSubmit();
       else if (pm.modal.classList.contains('visible')) pmSubmit();
@@ -1025,6 +1041,7 @@
 
   // F1 開幫助；? 也可（但要在 xterm 沒 focus 時才生效，避免吃掉 cc 自己的 ? 提示鍵）
   document.addEventListener('keydown', (e) => {
+    if (document.getElementById('monitor-modal').classList.contains('visible')) return; // 監控開著時不攔 F1/?
     if (e.code === 'F1') {
       e.preventDefault();
       if (helpModal.classList.contains('visible')) closeHelp(); else openHelp();
@@ -1120,6 +1137,219 @@
   }
   document.getElementById('login-submit').addEventListener('click', submitLogin);
   loginTokenEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLogin(); });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 監控頁（唯讀 pull：讀 /api/usage + /api/usage/sensitive；背景 watcher 維護索引）
+  // ──────────────────────────────────────────────────────────────────────
+  const monModal = document.getElementById('monitor-modal');
+  const monTotals = document.getElementById('mon-totals');
+  const monUsageEl = document.getElementById('mon-usage');
+  const monDashEl = document.getElementById('mon-dash');
+  const monSensEl = document.getElementById('mon-sensitive');
+  const monUpdated = document.getElementById('mon-updated');
+  const monSwBadge = document.getElementById('mon-sw-badge');
+  const monLiveEl = document.getElementById('mon-live');
+  let monWs = null;            // 即時推送 WS
+  let monConvoOpen = false;    // 有對話展開時，即時更新不重繪表格（避免收合）
+
+  const monFmt = (n) => (n || 0).toLocaleString('en-US');
+  const monFmtK = (n) => { n = n || 0; return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n); };
+  function monFmtTs(s) { if (!s) return '-'; try { return new Date(s).toLocaleString('zh-TW', { hour12: false }); } catch { return s; } }
+  function monFmtUsd(n) { n = n || 0; return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function monEsc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+  function openMonitor() { monModal.classList.add('visible'); monConvoOpen = false; loadMonitor(); monLiveConnect(); }
+  function closeMonitor() { monModal.classList.remove('visible'); monLiveDisconnect(); }
+
+  async function loadMonitor() {
+    monTotals.innerHTML = '<span style="color:#888">載入中…</span>';
+    try {
+      const [usage, sens] = await Promise.all([
+        apiFetch('/api/usage').then((r) => r.json()),
+        apiFetch('/api/usage/sensitive').then((r) => r.json()),
+      ]);
+      monRenderTotals(usage.totals, usage.updatedAt);
+      monRenderUsage(usage.sessions || []);
+      monRenderCharts(usage.byModel || [], usage.byDay || []);
+      monRenderSensitive(sens.hits || []);
+    } catch (err) {
+      if (err.message === 'unauthorized') return; // apiFetch 已彈登入
+      monTotals.innerHTML = '<span style="color:#f48771">載入失敗：' + monEsc(err.message) + '</span>';
+    }
+  }
+
+  // 即時 WS：watcher 每次掃描推一份聚合 view → 更新總覽/圖表（表格在無展開時也刷新）
+  function monLiveConnect() {
+    monLiveDisconnect();
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let url = `${proto}//${location.host}/api/usage/stream`;
+    if (authToken) url += '?token=' + encodeURIComponent(authToken);
+    try { monWs = new WebSocket(url); } catch { return; }
+    monWs.onopen = () => monLiveEl.classList.add('on');
+    monWs.onclose = () => monLiveEl.classList.remove('on');
+    monWs.onerror = () => monLiveEl.classList.remove('on');
+    monWs.onmessage = (ev) => {
+      let view;
+      try { view = JSON.parse(ev.data); } catch { return; }
+      if (!view || view.type !== 'usage') return;
+      monApplyView(view);
+      monLiveEl.classList.remove('pulse'); void monLiveEl.offsetWidth; monLiveEl.classList.add('pulse');
+    };
+  }
+  function monLiveDisconnect() {
+    if (monWs) { try { monWs.close(); } catch {} monWs = null; }
+    monLiveEl.classList.remove('on');
+  }
+
+  // 套用一份推送來的 view（不抓 sensitive 清單——那要另一個 endpoint）
+  function monApplyView(view) {
+    monRenderTotals(view.totals, view.updatedAt);
+    monRenderCharts(view.byModel || [], view.byDay || []);
+    // 表格：有對話展開時不重繪（避免把使用者正在看的內容收掉）
+    if (!monConvoOpen) monRenderUsage(view.sessions || []);
+    // 敏感詞分頁開著才順手刷新命中清單
+    if (monSensEl.classList.contains('active')) {
+      apiFetch('/api/usage/sensitive').then((r) => r.json())
+        .then((s) => monRenderSensitive(s.hits || [])).catch(() => {});
+    }
+  }
+
+  function monBarRow(label, value, max, valStr, color) {
+    const pct = Math.max(2, Math.round((value / (max || 1)) * 100));
+    return `<div class="bar-row"><span class="bar-label" title="${monEsc(label)}">${monEsc(label)}</span>`
+      + `<span class="bar-track"><span class="bar-fill" style="width:${pct}%;background:${color}"></span></span>`
+      + `<span class="bar-val">${valStr}</span></div>`;
+  }
+
+  function monRenderCharts(byModel, byDay) {
+    const mMax = Math.max(1, ...byModel.map((b) => b.costUsd));
+    const modelBars = byModel.length
+      ? byModel.map((b) => monBarRow(b.model, b.costUsd, mMax,
+          `${monFmtUsd(b.costUsd)} · ${monFmt(b.turns)} turns`, '#6cc04a')).join('')
+      : '<div class="mon-empty">尚無資料（點「重審歷史」可套用到既有對話）</div>';
+    const recent = byDay.slice(-30);
+    const dMax = Math.max(1, ...recent.map((b) => b.costUsd));
+    const dayBars = recent.length
+      ? recent.map((b) => monBarRow(b.day, b.costUsd, dMax,
+          `${monFmtUsd(b.costUsd)} · ${monFmt(b.turns)} turns`, '#0e9bd6')).join('')
+      : '<div class="mon-empty">尚無資料</div>';
+    monDashEl.innerHTML =
+      `<div class="chart-block"><h3>成本 — 按 Model</h3>${modelBars}</div>` +
+      `<div class="chart-block"><h3>成本趨勢 — 按日（近 30 天）</h3>${dayBars}</div>`;
+  }
+
+  function monRenderTotals(t, updatedAt) {
+    t = t || { tokens: {} };
+    const tk = t.tokens || {};
+    monUpdated.textContent = updatedAt ? ('索引更新：' + monFmtTs(updatedAt)) : '';
+    const sw = t.sensitiveHits || 0;
+    monSwBadge.style.display = sw ? '' : 'none';
+    monSwBadge.textContent = sw;
+    monTotals.innerHTML = [
+      ['Sessions', monFmt(t.sessions)],
+      ['Turns', monFmt(t.turns)],
+      ['Input', monFmt(tk.input)],
+      ['Output', monFmt(tk.output)],
+      ['Cache 建立', monFmt(tk.cacheCreate)],
+      ['Cache 讀取', monFmt(tk.cacheRead)],
+      ['成本估算', monFmtUsd(t.costUsd), 'cost'],
+      ['敏感詞命中', monFmt(sw), sw ? 'warn' : ''],
+    ].map(([k, v, cls]) => `<div class="stat"><span class="k">${k}</span><span class="v ${cls || ''}">${v}</span></div>`).join('');
+  }
+
+  function monRenderUsage(sessions) {
+    if (!sessions.length) {
+      monUsageEl.innerHTML = '<div class="mon-empty">尚無採集到的 session。daemon 重啟後背景 watcher 會開始採集。</div>';
+      return;
+    }
+    const rows = sessions.map((s) => {
+      const models = Object.keys(s.models || {}).join(', ') || '-';
+      const sw = s.sensitiveHitCount || 0;
+      const summary = monEsc(s.summary) || '<span style="color:#666">(空)</span>';
+      return `<tr class="sess-row" data-sid="${monEsc(s.sessionId)}">
+        <td><div class="mon-summary" title="${monEsc(s.summary)}">${summary}</div>
+            <div style="color:#666;font-size:10px">${monEsc(s.sessionId.slice(0, 8))} · ${monEsc(s.cwd || s.projectDir || '')}</div></td>
+        <td class="mon-model">${monEsc(models)}</td>
+        <td class="num">${monFmt(s.turns)}</td>
+        <td class="num">${monFmt(s.tokens.input)}</td>
+        <td class="num">${monFmt(s.tokens.output)}</td>
+        <td class="num">${monFmt(s.tokens.cacheRead)}</td>
+        <td class="num mon-cost">${monFmtUsd(s.costUsd)}</td>
+        <td class="num">${sw ? `<span class="mon-sw-count">${sw}</span>` : '-'}</td>
+        <td style="color:#888;white-space:nowrap">${monFmtTs(s.lastTs)}</td>
+      </tr>
+      <tr class="convo-row" data-for="${monEsc(s.sessionId)}" style="display:none"><td colspan="9" style="background:#1b1b1b"><div class="convo-body"></div></td></tr>`;
+    }).join('');
+    monUsageEl.innerHTML = `<table class="mon-table">
+      <thead><tr><th>Session</th><th>Model</th><th>Turns</th><th>Input</th><th>Output</th><th>Cache讀</th><th>成本</th><th>敏感</th><th>最後活動</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+    monUsageEl.querySelectorAll('tr.sess-row').forEach((tr) => {
+      tr.addEventListener('click', () => monToggleConvo(tr.dataset.sid));
+    });
+  }
+
+  async function monToggleConvo(sid) {
+    const convoRow = monUsageEl.querySelector(`tr.convo-row[data-for="${CSS.escape(sid)}"]`);
+    if (!convoRow) return;
+    if (convoRow.style.display !== 'none') {
+      convoRow.style.display = 'none';
+      monConvoOpen = !!monUsageEl.querySelector('tr.convo-row:not([style*="display: none"])');
+      return;
+    }
+    convoRow.style.display = '';
+    monConvoOpen = true;
+    const body = convoRow.querySelector('.convo-body');
+    body.innerHTML = '<div style="color:#888;padding:8px">載入對話…</div>';
+    try {
+      const c = await apiFetch('/api/usage/' + encodeURIComponent(sid) + '/conversation').then((r) => r.json());
+      const turns = c.turns || [];
+      if (!turns.length) { body.innerHTML = '<div class="mon-empty">無對話內容</div>'; return; }
+      body.innerHTML = '<div class="mon-convo">' + turns.map((t) => {
+        const tok = t.tokens ? ` · in ${monFmtK(t.tokens.input)} out ${monFmtK(t.tokens.output)}` : '';
+        return `<div class="turn ${monEsc(t.role)}"><div class="role">${monEsc(t.role)}${t.model ? ' · ' + monEsc(t.model) : ''}${tok}</div><div class="text">${monEsc(t.text)}</div></div>`;
+      }).join('') + '</div>';
+    } catch (err) {
+      if (err.message === 'unauthorized') return;
+      body.innerHTML = '<div style="color:#f48771;padding:8px">載入失敗：' + monEsc(err.message) + '</div>';
+    }
+  }
+
+  function monRenderSensitive(hits) {
+    if (!hits.length) {
+      monSensEl.innerHTML = '<div class="mon-empty">目前無敏感詞命中。詞庫：<code>~/.kabby/sensitive-words.json</code>（改完按「重審歷史」可套用到舊對話）</div>';
+      return;
+    }
+    monSensEl.innerHTML = hits.map((h) => `<div class="mon-hit">
+      <span class="word">${monEsc(h.word)}</span>
+      <span class="role">${monEsc(h.role)}</span>
+      <span class="snippet" title="${monEsc(h.snippet)}">${monEsc(h.snippet)}</span>
+      <span class="where">${monEsc(h.sessionId.slice(0, 8))} · ${monFmtTs(h.ts)}</span>
+    </div>`).join('');
+  }
+
+  monModal.querySelectorAll('.mon-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      monModal.querySelectorAll('.mon-tab').forEach((b) => b.classList.toggle('active', b === btn));
+      const v = btn.dataset.view;
+      monUsageEl.classList.toggle('active', v === 'usage');
+      monDashEl.classList.toggle('active', v === 'dash');
+      monSensEl.classList.toggle('active', v === 'sensitive');
+    });
+  });
+  document.getElementById('monitor-btn').addEventListener('click', openMonitor);
+  document.getElementById('mon-close').addEventListener('click', closeMonitor);
+  document.getElementById('mon-refresh').addEventListener('click', loadMonitor);
+  document.getElementById('mon-rebuild').addEventListener('click', async () => {
+    if (!confirm('重審歷史：砍索引從頭全掃，把目前敏感詞庫套用到所有既有對話。資料量大時較久，確定？')) return;
+    monTotals.innerHTML = '<span style="color:#888">重審中（全掃）…</span>';
+    try {
+      await apiFetch('/api/usage?rebuild=1').then((r) => r.json());
+      await loadMonitor();
+    } catch (err) {
+      if (err.message === 'unauthorized') return;
+      monTotals.innerHTML = '<span style="color:#f48771">重審失敗：' + monEsc(err.message) + '</span>';
+    }
+  });
 
   // 週期刷新運行中 session 的 metadata；profile 不需高頻（鎖定中各自會 early-return）
   setInterval(refreshSessions, 3000);
