@@ -43,6 +43,11 @@ function freshEntry(sessionId, file, projectDirName) {
     mtimeMs: 0,
     firstTs: null,
     lastTs: null,
+    // 去重游標：一次 API 回應(同 requestId)會被 cc 按 content block 拆成多行寫入,
+    // 每行重貼「相同的整包 usage」。記住上一個 requestId,同 request 的後續行只計一次,
+    // 避免 token / turns 被 2~3x 灌水（與 ccusage 的 messageId:requestId 去重對齊）。
+    // 跨檔重複（resume/compact 複製舊訊息）僅佔 ~0.6%,不在此處理,屬已知餘差。
+    lastRequestId: null,
     summary: '',
     turns: 0,
     userMsgs: 0,
@@ -98,6 +103,16 @@ function accumulateLine(entry, line, matcher) {
   if (obj.cwd && !entry.cwd) entry.cwd = obj.cwd;
 
   if (obj.type === 'assistant' && obj.message) {
+    // 敏感詞掃描：每行各自的 content block 不同（thinking / text / tool_use），
+    // 必須逐行全掃才完整,因此放在去重判斷「之前」。
+    if (matcher) recordHits(entry, matcher, extractText(obj.message.content), 'assistant', ts);
+
+    // 同一 requestId 的後續行（其他 content block）→ usage 已在第一行計過,跳過累加。
+    // requestId 缺失（舊版 cc 格式）時不去重,維持逐行計（與既有測試行為一致）。
+    const rid = obj.requestId || null;
+    if (rid && rid === entry.lastRequestId) return;
+    if (rid) entry.lastRequestId = rid;
+
     const u = obj.message.usage || {};
     const din = u.input_tokens || 0;
     const dout = u.output_tokens || 0;
@@ -122,7 +137,6 @@ function accumulateLine(entry, line, matcher) {
       d.turns += 1;
       addTok(d.models[m] || (d.models[m] = newTok()), din, dout, dread, c5, c1);
     }
-    if (matcher) recordHits(entry, matcher, extractText(obj.message.content), 'assistant', ts);
   } else if (obj.type === 'user' && obj.message) {
     entry.userMsgs += 1;
     const t = stripTags(extractText(obj.message.content));
@@ -408,6 +422,164 @@ function readConversation(sessionId) {
   });
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// 單 session 成本歸因（drill-down）
+//
+// 目的：回答「這個 session 為什麼貴 / 誰把 token 吃掉的」。
+// 做法：讀全檔,把同一 requestId 的多個 content-block 行收斂成「一個回應」,
+//       用相對成本單位排序（相對單位用於歸因排序;精確金額由 pricing.js 負責）：
+//         input 1× / cacheRead 0.1× / cacheCreate 1.25× / output 5×
+//       再從每一行收集 tool_use（工具呼叫散在不同 block 行）與 thinking 標記,
+//       最後產生診斷（長 session 稅 / 吞大檔 / 囉嗦）。
+// ──────────────────────────────────────────────────────────────────────────
+const COST_W = { input: 1, output: 5, cacheCreate: 1.25, cacheRead: 0.1 };
+
+function unitsOf(tk) {
+  return tk.input * COST_W.input + tk.output * COST_W.output
+    + tk.cacheCreate * COST_W.cacheCreate + tk.cacheRead * COST_W.cacheRead;
+}
+
+/** 從 tool_use input 取一段可讀提示（檔名 / 指令 / 樣式…）。 */
+function toolHint(input) {
+  if (!input || typeof input !== 'object') return '';
+  const h = input.file_path || input.command || input.pattern || input.path
+    || input.url || input.description || input.prompt || '';
+  return String(h).replace(/\s+/g, ' ').slice(0, 60);
+}
+
+/** 把一個 session 的全部回應記錄聚成分析結果（純函數,供測試）。 */
+function buildAnalysis(sessionId, file, reqs) {
+  reqs.sort((a, b) => a.order - b.order);
+  for (const r of reqs) r.units = unitsOf(r.tokens);
+  const total = reqs.reduce((s, r) => s + r.units, 0) || 1;
+  for (const r of reqs) r.pct = r.units / total;
+
+  const split = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
+  const rawSplit = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
+  const toolCounts = {};
+  for (const r of reqs) {
+    split.input += r.tokens.input * COST_W.input;
+    split.output += r.tokens.output * COST_W.output;
+    split.cacheCreate += r.tokens.cacheCreate * COST_W.cacheCreate;
+    split.cacheRead += r.tokens.cacheRead * COST_W.cacheRead;
+    rawSplit.input += r.tokens.input; rawSplit.output += r.tokens.output;
+    rawSplit.cacheCreate += r.tokens.cacheCreate; rawSplit.cacheRead += r.tokens.cacheRead;
+    for (const t of r.tools) toolCounts[t.name] = (toolCounts[t.name] || 0) + 1;
+  }
+
+  const slim = (r) => ({
+    order: r.order, ts: r.ts, model: r.model, tokens: r.tokens,
+    units: Math.round(r.units), pct: r.pct, tools: r.tools, thinking: r.thinking,
+  });
+  const topByUnits = [...reqs].sort((a, b) => b.units - a.units).slice(0, 10).map(slim);
+  const topByOutput = [...reqs].sort((a, b) => b.tokens.output - a.tokens.output).slice(0, 5).map(slim);
+  const topByCacheCreate = [...reqs].sort((a, b) => b.tokens.cacheCreate - a.tokens.cacheCreate).slice(0, 5).map(slim);
+
+  return {
+    sessionId, file,
+    requests: reqs.length,
+    weights: COST_W,
+    totalUnits: Math.round(total),
+    split, rawSplit, toolCounts,
+    topByUnits, topByOutput, topByCacheCreate,
+    findings: diagnose(reqs, split, total, topByUnits),
+  };
+}
+
+/** 規則式診斷:把常見的「貴法」翻成人話。 */
+function diagnose(reqs, split, total, topByUnits) {
+  const findings = [];
+  if (!reqs.length) return findings;
+  const n = reqs.length;
+  const topShare = topByUnits.length ? topByUnits[0].pct : 0;
+  const crShare = split.cacheRead / total;
+  const outShare = split.output / total;
+
+  // 長 session 稅:輪數多 + cacheRead 主導成本 + 沒有單一高峰輪
+  if (n >= 25 && crShare >= 0.45 && topShare < 0.10) {
+    findings.push({
+      type: 'long-session', level: 'warn', title: '長 session 稅',
+      detail: `共 ${n} 輪,context 養大後每輪都把整包重讀一次（cacheRead 佔成本 ${(crShare * 100).toFixed(0)}%），沒有單一兇手輪。建議早點 /compact 或拆成多個短 session。`,
+    });
+  }
+  // 吞大檔:某輪 cacheCreate 遠高於中位數
+  const cws = reqs.map((r) => r.tokens.cacheCreate).filter((x) => x > 0).sort((a, b) => a - b);
+  if (cws.length) {
+    const med = cws[Math.floor(cws.length / 2)];
+    const top = reqs.reduce((m, r) => (r.tokens.cacheCreate > m.tokens.cacheCreate ? r : m));
+    if (med > 0 && top.tokens.cacheCreate >= Math.max(8000, med * 6)) {
+      const tool = top.tools[0];
+      findings.push({
+        type: 'big-ingest', level: 'warn', title: '某輪吞入大量內容',
+        detail: `第 ${top.order + 1} 輪一次寫入 ${top.tokens.cacheCreate.toLocaleString()} cacheCreate token（中位數 ${med.toLocaleString()}）${tool ? `，觸發工具 ${tool.name}${tool.hint ? ' ' + tool.hint : ''}` : ''}。常見原因:讀大檔 / 把大段輸出塞進 context。`,
+      });
+    }
+  }
+  // 囉嗦:output 佔成本偏高（output 單價最貴 5×）
+  if (outShare >= 0.35) {
+    const top = reqs.reduce((m, r) => (r.tokens.output > m.tokens.output ? r : m));
+    findings.push({
+      type: 'verbose', level: 'info', title: '模型輸出偏多',
+      detail: `Output 佔成本 ${(outShare * 100).toFixed(0)}%（最貴單輪 ${top.tokens.output.toLocaleString()} token）。output 單價最高（5×），可在 prompt 約束「精簡、勿整段貼代碼」。`,
+    });
+  }
+  if (!findings.length) {
+    findings.push({ type: 'ok', level: 'ok', title: '用量分布正常', detail: '沒有明顯的單輪異常或長 session 稅。' });
+  }
+  return findings;
+}
+
+/**
+ * 讀某 session 原檔,做成本歸因分析。回傳 buildAnalysis 結果,或 null（找不到檔）。
+ * 與 collector 一致:同 requestId 的多行只算一次 usage,但工具/thinking 從每行收集。
+ */
+function analyzeSession(sessionId) {
+  const file = findSessionFile(sessionId);
+  if (!file) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    const byReq = new Map(); // requestId(或 uuid fallback) -> 回應記錄
+    let order = 0;
+    const stream = fs.createReadStream(file, { encoding: 'utf8' });
+    const rl = readline.createInterface({ input: stream });
+    rl.on('line', (line) => {
+      if (!line.trim()) return;
+      let obj;
+      try { obj = JSON.parse(line); } catch { return; }
+      if (!obj || obj.type !== 'assistant' || !obj.message) return;
+      const rid = obj.requestId || ('uuid:' + obj.uuid);
+      let r = byReq.get(rid);
+      if (!r) {
+        const u = obj.message.usage || {};
+        r = {
+          order: order++,
+          ts: obj.timestamp || null,
+          model: obj.message.model || null,
+          tokens: {
+            input: u.input_tokens || 0,
+            output: u.output_tokens || 0,
+            cacheCreate: u.cache_creation_input_tokens || 0,
+            cacheRead: u.cache_read_input_tokens || 0,
+          },
+          tools: [],
+          thinking: false,
+        };
+        byReq.set(rid, r);
+      }
+      // tool_use 與 thinking 散在同一回應的不同 content-block 行 → 逐行收集
+      const content = obj.message.content;
+      if (Array.isArray(content)) {
+        for (const b of content) {
+          if (!b || typeof b !== 'object') continue;
+          if (b.type === 'tool_use') r.tools.push({ name: b.name || '?', hint: toolHint(b.input) });
+          else if (b.type === 'thinking') r.thinking = true;
+        }
+      }
+    });
+    rl.on('close', () => resolve(buildAnalysis(sessionId, file, [...byReq.values()])));
+    rl.on('error', reject);
+  });
+}
+
 module.exports = {
   scanAll,
   scanProject,
@@ -415,8 +587,10 @@ module.exports = {
   view,
   sensitiveHits,
   readConversation,
+  analyzeSession,
   findSessionFile,
   // 匯出供測試
   scanFile,
   buildView,
+  buildAnalysis,
 };

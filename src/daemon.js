@@ -284,6 +284,17 @@ app.get('/api/usage/:sessionId/conversation', async (req, res) => {
   }
 });
 
+// GET /api/usage/:sessionId/analysis → 單 session 成本歸因（誰貴/為何貴/診斷）
+app.get('/api/usage/:sessionId/analysis', async (req, res) => {
+  try {
+    const a = await ccCollector.analyzeSession(req.params.sessionId);
+    if (!a) return res.status(404).json({ error: 'session jsonl not found' });
+    res.json(a);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Static UI — mount after /api/* so API routes win
 app.use(express.static(PUBLIC_DIR));
 

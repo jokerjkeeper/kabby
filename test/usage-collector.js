@@ -94,6 +94,59 @@ function run() {
   fs.unlinkSync(tmp);
   console.log('✓ A. 增量正確性全部通過（累加 / 重掃不重複 / 半行安全 / 截斷重建）');
 
+  // ── A2. 同 requestId 去重（cc 把一次回應按 content block 拆多行、各行重貼相同 usage）──
+  // 這是 dashboard 2~3x 虛胖的根因:不去重會把一個回應的 token 算 N 次。
+  const tmpD = path.join(os.tmpdir(), `kabby-collector-dedup-${process.pid}.jsonl`);
+  const asstRid = (ts, rid, usage, block) => JSON.stringify({
+    type: 'assistant', timestamp: ts, requestId: rid, cwd: 'D:\\Git\\demo', sessionId: 'sess-D',
+    message: { model: 'claude-opus-4-8', role: 'assistant', content: [block], usage },
+  });
+  // 一次回應 req-1 拆成 3 行（thinking + 2 個 tool_use），各行帶相同整包 usage
+  fs.writeFileSync(tmpD, [
+    userLine('2026-06-12T03:00:00Z', 'do it'),
+    asstRid('2026-06-12T03:00:01Z', 'req-1', u(100, 200, 300, 400), { type: 'thinking', thinking: 'hmm' }),
+    asstRid('2026-06-12T03:00:01Z', 'req-1', u(100, 200, 300, 400), { type: 'tool_use', name: 'Read', input: { file_path: 'a.js' } }),
+    asstRid('2026-06-12T03:00:01Z', 'req-1', u(100, 200, 300, 400), { type: 'tool_use', name: 'Edit', input: { file_path: 'b.js' } }),
+    // 第二次回應 req-2 單行
+    asstRid('2026-06-12T03:00:05Z', 'req-2', u(10, 20, 0, 500), { type: 'text', text: 'done' }),
+    '',
+  ].join('\n'), 'utf8');
+  const idxD = { version: 1, updatedAt: null, sessions: {} };
+  const eD = scanFile(tmpD, 'sess-D', 'D--Git-demo', idxD);
+  assert.strictEqual(eD.turns, 2, '兩個 requestId → turns=2（非 4）');
+  assert.strictEqual(eD.tokens.input, 110, 'input 每 request 一次:100+10');
+  assert.strictEqual(eD.tokens.output, 220, 'output 每 request 一次:200+20');
+  assert.strictEqual(eD.tokens.cacheCreate, 300, 'cacheCreate 只算 req-1 一次');
+  assert.strictEqual(eD.tokens.cacheRead, 900, 'cacheRead:400+500');
+  // 重掃不變
+  const eD2 = scanFile(tmpD, 'sess-D', 'D--Git-demo', idxD);
+  assert.strictEqual(eD2.turns, 2, '重掃仍 turns=2');
+  assert.strictEqual(eD2.tokens.output, 220, '重掃 tokens 不變');
+  fs.unlinkSync(tmpD);
+  console.log('✓ A2. 同 requestId 去重通過（多 content-block 行只計一次 / 重掃穩定）');
+
+  // ── A3. analyzeSession 歸因（buildAnalysis 純函數）──
+  const { buildAnalysis } = require('../src/cc-collector');
+  const mkReq = (order, out, cw, cr, tools) => ({
+    order, ts: null, model: 'claude-opus-4-8',
+    tokens: { input: 0, output: out, cacheCreate: cw, cacheRead: cr },
+    tools: tools || [], thinking: false,
+  });
+  const an = buildAnalysis('sess-X', '/x.jsonl', [
+    mkReq(0, 100, 50000, 1000, [{ name: 'Read', hint: 'big.json' }]), // 吞大檔(cw 50000)
+    mkReq(1, 20000, 100, 2000, []),                                   // output 大(20000×5 > 50000×1.25)
+    mkReq(2, 200, 200, 3000, [{ name: 'Edit', hint: 'a.js' }]),
+  ]);
+  assert.strictEqual(an.requests, 3, 'requests=3');
+  // units: out×5 + cw×1.25 + cr×0.1。req1 output 5000×5=25000 最貴 → 排第一
+  assert.strictEqual(an.topByUnits[0].order, 1, 'output 最大的輪排最貴');
+  assert.strictEqual(an.topByCacheCreate[0].order, 0, 'cacheCreate 最大的是吞大檔那輪');
+  assert.strictEqual(an.toolCounts.Read, 1, '工具計數 Read=1');
+  assert.strictEqual(an.toolCounts.Edit, 1, '工具計數 Edit=1');
+  assert.ok(an.findings.some((f) => f.type === 'big-ingest'), '應診斷出吞大檔');
+  assert.ok(an.findings.some((f) => f.type === 'verbose'), 'output 佔比高應診斷囉嗦');
+  console.log('✓ A3. analyzeSession 歸因通過（排序 / 工具計數 / 診斷）');
+
   // buildView 過濾 + 聚合
   const idx2 = {
     version: 1, updatedAt: 'X',

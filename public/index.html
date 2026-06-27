@@ -502,6 +502,28 @@
     .mon-convo .turn.user .role { color: #4ec9b0; }
     .mon-convo .turn.assistant .role { color: #9cdcfe; }
     .mon-convo .turn .text { color: #d4d4d4; white-space: pre-wrap; word-break: break-word; margin-top: 2px; max-height: 220px; overflow: auto; }
+    /* 成本歸因面板 */
+    .mon-analysis { padding: 10px 12px 14px; border-bottom: 2px solid #2f2f2f; background: #1e1e1e; }
+    .mon-analysis h4 { font-size: 11px; color: #aaa; font-weight: 600; margin: 12px 0 6px; text-transform: uppercase; letter-spacing: .5px; }
+    .mon-analysis h4:first-child { margin-top: 0; }
+    .mon-finding { border-left: 3px solid #555; padding: 6px 10px; margin: 6px 0; background: #232323; border-radius: 0 3px 3px 0; font-size: 12px; }
+    .mon-finding.warn { border-left-color: #d99a2b; }
+    .mon-finding.info { border-left-color: #0e9bd6; }
+    .mon-finding.ok { border-left-color: #6cc04a; }
+    .mon-finding .ft { font-weight: 600; color: #eee; }
+    .mon-finding .fd { color: #bbb; margin-top: 2px; line-height: 1.5; }
+    table.mon-turns { width: 100%; border-collapse: collapse; font-size: 11px; }
+    table.mon-turns th { color: #888; text-align: right; padding: 3px 8px; border-bottom: 1px solid #333; font-weight: 500; }
+    table.mon-turns th:first-child, table.mon-turns th.l { text-align: left; }
+    table.mon-turns td { padding: 3px 8px; border-bottom: 1px solid #262626; text-align: right; font-variant-numeric: tabular-nums; font-family: 'Cascadia Code', Consolas, monospace; color: #ccc; }
+    table.mon-turns td.l { text-align: left; font-family: inherit; color: #9cdcfe; }
+    table.mon-turns td.l .hint { color: #777; }
+    .mon-split { display: flex; gap: 12px; flex-wrap: wrap; margin: 4px 0; }
+    .mon-split .seg { font-size: 11px; color: #aaa; }
+    .mon-split .seg b { color: #ddd; font-variant-numeric: tabular-nums; }
+    .mon-toolchips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .mon-toolchips .chip { font-size: 11px; background: #2a2a2a; color: #bbb; border-radius: 10px; padding: 2px 9px; }
+    .mon-toolchips .chip b { color: #9cdcfe; }
     .mon-hit { padding: 6px 8px; border-bottom: 1px solid #2a2a2a; display: flex; gap: 10px; align-items: baseline; font-size: 12px; }
     .mon-hit .word { color: #ffd97a; font-weight: 600; font-family: 'Cascadia Code', Consolas, monospace; flex: 0 0 auto; }
     .mon-hit .role { color: #888; font-size: 10px; flex: 0 0 auto; }

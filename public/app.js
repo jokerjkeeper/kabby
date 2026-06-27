@@ -1299,19 +1299,72 @@
     convoRow.style.display = '';
     monConvoOpen = true;
     const body = convoRow.querySelector('.convo-body');
-    body.innerHTML = '<div style="color:#888;padding:8px">載入對話…</div>';
+    body.innerHTML = '<div style="color:#888;padding:8px">分析中…</div>';
     try {
-      const c = await apiFetch('/api/usage/' + encodeURIComponent(sid) + '/conversation').then((r) => r.json());
+      // 並行抓「成本歸因」與「完整對話」
+      const [analysis, c] = await Promise.all([
+        apiFetch('/api/usage/' + encodeURIComponent(sid) + '/analysis').then((r) => r.json()).catch(() => null),
+        apiFetch('/api/usage/' + encodeURIComponent(sid) + '/conversation').then((r) => r.json()),
+      ]);
       const turns = c.turns || [];
-      if (!turns.length) { body.innerHTML = '<div class="mon-empty">無對話內容</div>'; return; }
-      body.innerHTML = '<div class="mon-convo">' + turns.map((t) => {
-        const tok = t.tokens ? ` · in ${monFmtK(t.tokens.input)} out ${monFmtK(t.tokens.output)}` : '';
-        return `<div class="turn ${monEsc(t.role)}"><div class="role">${monEsc(t.role)}${t.model ? ' · ' + monEsc(t.model) : ''}${tok}</div><div class="text">${monEsc(t.text)}</div></div>`;
-      }).join('') + '</div>';
+      const convoHtml = turns.length
+        ? '<div class="mon-convo">' + turns.map((t) => {
+            const tok = t.tokens ? ` · in ${monFmtK(t.tokens.input)} out ${monFmtK(t.tokens.output)}` : '';
+            return `<div class="turn ${monEsc(t.role)}"><div class="role">${monEsc(t.role)}${t.model ? ' · ' + monEsc(t.model) : ''}${tok}</div><div class="text">${monEsc(t.text)}</div></div>`;
+          }).join('') + '</div>'
+        : '<div class="mon-empty">無對話內容</div>';
+      body.innerHTML = monRenderAnalysis(analysis) + convoHtml;
     } catch (err) {
       if (err.message === 'unauthorized') return;
       body.innerHTML = '<div style="color:#f48771;padding:8px">載入失敗：' + monEsc(err.message) + '</div>';
     }
+  }
+
+  // 成本歸因面板:診斷 + 最貴的輪 + 來源拆分 + 工具計數
+  function monRenderAnalysis(a) {
+    if (!a || !a.requests) return '';
+    const tot = a.totalUnits || 1;
+    const findings = (a.findings || []).map((f) =>
+      `<div class="mon-finding ${monEsc(f.level)}"><div class="ft">${monEsc(f.title)}</div><div class="fd">${monEsc(f.detail)}</div></div>`).join('');
+
+    // 來源拆分（成本單位佔比）
+    const sp = a.split || {};
+    const seg = (label, v) => `<span class="seg">${label} <b>${((v / tot) * 100).toFixed(0)}%</b></span>`;
+    const splitHtml = `<div class="mon-split">${seg('Output(5×)', sp.output)}${seg('CacheCreate(1.25×)', sp.cacheCreate)}${seg('CacheRead(0.1×)', sp.cacheRead)}${seg('Input(1×)', sp.input)}</div>`;
+
+    // 最貴的輪
+    const rows = (a.topByUnits || []).map((r) => {
+      const tools = r.tools && r.tools.length
+        ? r.tools.map((t) => monEsc(t.name) + (t.hint ? ` <span class="hint">${monEsc(t.hint)}</span>` : '')).join('; ')
+        : (r.thinking ? '<span class="hint">(thinking / 純文字)</span>' : '<span class="hint">(純文字)</span>');
+      return `<tr>
+        <td class="l">#${r.order + 1}</td>
+        <td>${(r.pct * 100).toFixed(1)}%</td>
+        <td>${monFmt(r.tokens.output)}</td>
+        <td>${monFmt(r.tokens.cacheCreate)}</td>
+        <td>${monFmt(r.tokens.cacheRead)}</td>
+        <td class="l">${tools}</td>
+      </tr>`;
+    }).join('');
+    const turnsTable = rows ? `<table class="mon-turns">
+      <thead><tr><th class="l">輪</th><th>佔比</th><th>Output</th><th>CacheCreate</th><th>CacheRead</th><th class="l">觸發工具</th></tr></thead>
+      <tbody>${rows}</tbody></table>` : '';
+
+    // 工具計數
+    const tc = Object.entries(a.toolCounts || {}).sort((x, y) => y[1] - x[1]);
+    const chips = tc.length
+      ? `<div class="mon-toolchips">${tc.map(([n, c]) => `<span class="chip">${monEsc(n)} <b>${c}</b></span>`).join('')}</div>`
+      : '';
+
+    return `<div class="mon-analysis">
+      <h4>診斷（${a.requests} 個回應 · 相對成本單位）</h4>
+      ${findings}
+      <h4>成本來源拆分</h4>
+      ${splitHtml}
+      <h4>最貴的輪</h4>
+      ${turnsTable}
+      ${chips ? '<h4>工具呼叫</h4>' + chips : ''}
+    </div>`;
   }
 
   function monRenderSensitive(hits) {
@@ -1340,7 +1393,7 @@
   document.getElementById('mon-close').addEventListener('click', closeMonitor);
   document.getElementById('mon-refresh').addEventListener('click', loadMonitor);
   document.getElementById('mon-rebuild').addEventListener('click', async () => {
-    if (!confirm('重審歷史：砍索引從頭全掃，把目前敏感詞庫套用到所有既有對話。資料量大時較久，確定？')) return;
+    if (!confirm('重審歷史：砍索引從頭全掃，重新計算所有既有對話的 token/成本（套用 requestId 去重修正，數字會校正到正確值）並套用目前敏感詞庫。資料量大時較久，確定？')) return;
     monTotals.innerHTML = '<span style="color:#888">重審中（全掃）…</span>';
     try {
       await apiFetch('/api/usage?rebuild=1').then((r) => r.json());
