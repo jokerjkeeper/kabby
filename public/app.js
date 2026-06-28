@@ -658,6 +658,111 @@
     if (leaf && leaf.term) { try { leaf.term.focus(); } catch {} }
     updateStatusbar(leaf || null);
     renderTabs();
+    leafLiveSync(); // 焦點換了 → live 小面板跟著移到新 pane
+  }
+
+  // ── 焦點 session 即時 live 小面板（主介面浮層,右上角,可收合）────────────
+  // 跟著鍵盤焦點走;只輪詢「當前焦點 session」的 analyzeSession,顯示最近幾輪
+  // token / spike,讓你邊跑 cc 邊看 token 暴增,不必開監控。
+  let leafLiveOn = false;
+  let leafLiveExpanded = false;
+  let leafLiveTimer = null;
+  let leafLiveTargetSid = null;
+  let leafLiveEl = null;
+
+  function leafLiveEnsureEl() {
+    if (leafLiveEl) return leafLiveEl;
+    const el = document.createElement('div');
+    el.className = 'leaf-live';
+    el.innerHTML = '<div class="ll-head"><span class="ll-ico">📊</span>'
+      + '<span class="ll-sum">live</span><span class="ll-dot2">●</span></div>'
+      + '<div class="ll-body"></div>';
+    el.querySelector('.ll-head').addEventListener('click', (e) => {
+      e.stopPropagation();
+      leafLiveExpanded = !leafLiveExpanded;
+      el.classList.toggle('expanded', leafLiveExpanded);
+    });
+    el.addEventListener('mousedown', (e) => e.stopPropagation()); // 不搶 pane 焦點
+    leafLiveEl = el;
+    return el;
+  }
+
+  function leafLiveStop() { if (leafLiveTimer) { clearInterval(leafLiveTimer); leafLiveTimer = null; } }
+  function leafLiveStart() { if (!leafLiveTimer) leafLiveTimer = setInterval(leafLiveRefresh, 4000); }
+
+  // 焦點切換 / 開關時呼叫:把浮層掛到焦點 session pane,啟動/停止輪詢
+  function leafLiveSync() {
+    const leaf = leaves.get(focusedPaneId);
+    const sid = leaf && leaf.sessionId ? leaf.sessionId : null;
+    if (!leafLiveOn || !sid) {
+      if (leafLiveEl && leafLiveEl.parentNode) leafLiveEl.parentNode.removeChild(leafLiveEl);
+      leafLiveStop();
+      leafLiveTargetSid = null;
+      return;
+    }
+    const el = leafLiveEnsureEl();
+    el.classList.toggle('expanded', leafLiveExpanded);
+    if (el.parentNode !== leaf.el) leaf.el.appendChild(el);
+    if (sid !== leafLiveTargetSid) {
+      leafLiveTargetSid = sid;
+      el.querySelector('.ll-body').innerHTML = '<div style="padding:6px;color:#888">載入…</div>';
+      leafLiveRefresh();
+    }
+    leafLiveStart();
+  }
+
+  async function leafLiveRefresh() {
+    const sid = leafLiveTargetSid;
+    if (!sid || !leafLiveEl) return;
+    let a;
+    try { a = await apiFetch('/api/usage/' + encodeURIComponent(sid) + '/analysis').then((r) => r.json()); }
+    catch { return; }
+    if (sid !== leafLiveTargetSid) return; // 焦點已換,丟棄
+    leafLiveRender(a);
+  }
+
+  function leafLiveRender(a) {
+    const el = leafLiveEl;
+    if (!el) return;
+    const turns = (a && a.turns) || [];
+    const last = turns[turns.length - 1];
+    const recentSpike = turns.slice(-6).some((t) => (t.tokens.cacheCreate || 0) > SPIKE_CW);
+    el.classList.toggle('has-spike', recentSpike);
+    el.querySelector('.ll-sum').textContent = last ? `#${last.order + 1} cw${monFmtK(last.tokens.cacheCreate)}` : 'live';
+    el.querySelector('.ll-ico').textContent = recentSpike ? '🔴' : '📊';
+    const dot = el.querySelector('.ll-dot2');
+    const act = monIsActive(a);
+    dot.textContent = act ? '●' : '○';
+    dot.style.color = act ? '#4caf50' : '#777';
+    const rows = [];
+    for (let i = turns.length - 1; i >= 0 && rows.length < 15; i--) {
+      const t = turns[i];
+      const cw = t.tokens.cacheCreate || 0;
+      const spike = cw > SPIKE_CW;
+      const tools = (t.tools || []).map((x) =>
+        monEsc(x.name) + (x.hint ? `<span class="h"> ${monEsc(x.hint)}</span>` : '')).join('、') || '<span class="h">(純文字)</span>';
+      const prev = turns[i - 1];
+      const ing = spike && prev && prev.tools && prev.tools.length
+        ? `<div class="ll-ing">↑ #${prev.order + 1} ${monEsc(prev.tools[0].name)} 結果</div>` : '';
+      rows.push(`<div class="ll-row${spike ? ' spike' : ''}"><div class="ll-r1"><span class="ll-n">#${t.order + 1}</span><span class="ll-tools">${spike ? '🔴 ' : ''}${tools}</span></div><div class="ll-r2">out <b>${monFmtK(t.tokens.output)}</b> · cw <b class="${spike ? 'hot' : ''}">${monFmtK(cw)}</b> · cr ${monFmtK(t.tokens.cacheRead)}</div>${ing}</div>`);
+    }
+    el.querySelector('.ll-body').innerHTML = rows.join('') || '<div style="padding:6px;color:#888">無逐輪資料</div>';
+  }
+
+  function leafLiveToggle() {
+    leafLiveOn = !leafLiveOn;
+    try { localStorage.setItem('kabby.leafLive', leafLiveOn ? '1' : '0'); } catch {}
+    const btn = document.getElementById('leaflive-btn');
+    if (btn) btn.classList.toggle('on', leafLiveOn);
+    if (leafLiveOn && !leafLiveExpanded) leafLiveExpanded = true; // 首次開啟直接展開,讓使用者看到
+    leafLiveSync();
+  }
+
+  function leafLiveInit() {
+    try { leafLiveOn = localStorage.getItem('kabby.leafLive') === '1'; } catch {}
+    const btn = document.getElementById('leaflive-btn');
+    if (btn) { btn.classList.toggle('on', leafLiveOn); btn.addEventListener('click', leafLiveToggle); }
+    leafLiveSync();
   }
 
   // 左右(row) / 上下(col) 分割焦點 pane
@@ -1145,12 +1250,17 @@
   const monTotals = document.getElementById('mon-totals');
   const monUsageEl = document.getElementById('mon-usage');
   const monDashEl = document.getElementById('mon-dash');
+  const monLiveTabEl = document.getElementById('mon-livetab');
   const monSensEl = document.getElementById('mon-sensitive');
   const monUpdated = document.getElementById('mon-updated');
   const monSwBadge = document.getElementById('mon-sw-badge');
   const monLiveEl = document.getElementById('mon-live');
   let monWs = null;            // 即時推送 WS
   let monConvoOpen = false;    // 有對話展開時，即時更新不重繪表格（避免收合）
+  let monConvoLiveTimer = null; // 展開列右側 live feed 的輪詢 timer
+  let monTabLiveTimer = null;   // 頂部 Live 分頁的輪詢 timer
+  const SPIKE_CW = 15000;       // cacheCreate 超過此值 → 標紅（spike）。之後可做成設定項。
+  const LIVE_ACTIVE_MS = 3 * 60 * 1000; // 最後一輪在 3 分鐘內 → 視為「進行中」,啟動輪詢
 
   const monFmt = (n) => (n || 0).toLocaleString('en-US');
   const monFmtK = (n) => { n = n || 0; return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n); };
@@ -1159,7 +1269,7 @@
   function monEsc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 
   function openMonitor() { monModal.classList.add('visible'); monConvoOpen = false; loadMonitor(); monLiveConnect(); }
-  function closeMonitor() { monModal.classList.remove('visible'); monLiveDisconnect(); }
+  function closeMonitor() { monModal.classList.remove('visible'); monLiveDisconnect(); monStopConvoLive(); monStopTabLive(); }
 
   async function loadMonitor() {
     monTotals.innerHTML = '<span style="color:#888">載入中…</span>';
@@ -1293,11 +1403,13 @@
     if (!convoRow) return;
     if (convoRow.style.display !== 'none') {
       convoRow.style.display = 'none';
+      monStopConvoLive();
       monConvoOpen = !!monUsageEl.querySelector('tr.convo-row:not([style*="display: none"])');
       return;
     }
     convoRow.style.display = '';
     monConvoOpen = true;
+    monStopConvoLive(); // 切換到別的 session 前先停舊輪詢
     const body = convoRow.querySelector('.convo-body');
     body.innerHTML = '<div style="color:#888;padding:8px">分析中…</div>';
     try {
@@ -1313,11 +1425,67 @@
             return `<div class="turn ${monEsc(t.role)}"><div class="role">${monEsc(t.role)}${t.model ? ' · ' + monEsc(t.model) : ''}${tok}</div><div class="text">${monEsc(t.text)}</div></div>`;
           }).join('') + '</div>'
         : '<div class="mon-empty">無對話內容</div>';
-      body.innerHTML = monRenderAnalysis(analysis) + convoHtml;
+      // 左:歸因 + 對話;右:live 逐輪 feed
+      body.innerHTML = `<div class="convo-main">${monRenderAnalysis(analysis)}${convoHtml}</div>`
+        + `<div class="convo-live">${monRenderLive(analysis)}</div>`;
+      monMaybeStartConvoLive(sid, analysis, convoRow); // 進行中才輪詢
     } catch (err) {
       if (err.message === 'unauthorized') return;
       body.innerHTML = '<div style="color:#f48771;padding:8px">載入失敗：' + monEsc(err.message) + '</div>';
     }
+  }
+
+  function monStopConvoLive() {
+    if (monConvoLiveTimer) { clearInterval(monConvoLiveTimer); monConvoLiveTimer = null; }
+  }
+
+  // 最後一輪在 LIVE_ACTIVE_MS 內 → 視為進行中
+  function monIsActive(a) {
+    const ts = a && a.turns && a.turns.length ? a.turns[a.turns.length - 1].ts : null;
+    return ts ? (Date.now() - new Date(ts).getTime() < LIVE_ACTIVE_MS) : false;
+  }
+
+  // 進行中的 session → 每 4s 重抓 analysis 刷新右側 live feed;變 idle 或收合即停
+  function monMaybeStartConvoLive(sid, analysis, convoRow) {
+    if (!monIsActive(analysis)) return;
+    monConvoLiveTimer = setInterval(async () => {
+      if (!convoRow.isConnected || convoRow.style.display === 'none') { monStopConvoLive(); return; }
+      try {
+        const a = await apiFetch('/api/usage/' + encodeURIComponent(sid) + '/analysis').then((r) => r.json());
+        const el = convoRow.querySelector('.convo-live');
+        if (el) el.innerHTML = monRenderLive(a);
+        if (!monIsActive(a)) monStopConvoLive();
+      } catch { monStopConvoLive(); }
+    }, 4000);
+  }
+
+  // Live 逐輪 feed（右側欄 / 頂部分頁共用）：newest-first,cacheCreate>SPIKE_CW 標紅,
+  // spike 顯示「↑ 上一輪工具的結果被 ingest」。
+  function monRenderLive(a, opts) {
+    opts = opts || {};
+    if (!a || !a.turns || !a.turns.length) return '<div class="mon-empty">無逐輪資料</div>';
+    const turns = a.turns; // oldest-first
+    const active = monIsActive(a);
+    const head = `<div class="live-head">${monEsc(opts.title || 'LIVE 逐輪')} · ${a.requests} 輪 `
+      + (active ? '<span class="live-dot">●live</span>' : '<span class="live-idle">idle</span>') + '</div>';
+    const rows = [];
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const t = turns[i];
+      const cw = t.tokens.cacheCreate || 0;
+      const spike = cw > SPIKE_CW;
+      const ownTools = (t.tools || []).map((x) =>
+        monEsc(x.name) + (x.hint ? `<span class="lh"> ${monEsc(x.hint)}</span>` : '')).join('、');
+      const prev = turns[i - 1];
+      const ingest = spike && prev && prev.tools && prev.tools.length
+        ? `<div class="lr-ingest">↑ 吞入 #${prev.order + 1} 的 ${monEsc(prev.tools[0].name)}${prev.tools[0].hint ? ' ' + monEsc(prev.tools[0].hint) : ''} 結果</div>`
+        : '';
+      rows.push(`<div class="live-row${spike ? ' spike' : ''}">
+        <div class="lr-head"><span class="lr-n">#${t.order + 1}</span>${spike ? '<span class="lr-flag">🔴</span>' : ''}<span class="lr-tools">${ownTools || '<span class="lh">(純文字)</span>'}</span></div>
+        <div class="lr-tok">out <b>${monFmtK(t.tokens.output)}</b> · cw <b class="${spike ? 'hot' : ''}">${monFmtK(cw)}</b> · cr ${monFmtK(t.tokens.cacheRead)} · in ${monFmtK(t.tokens.input)}</div>
+        ${ingest}
+      </div>`);
+    }
+    return head + '<div class="live-list">' + rows.join('') + '</div>';
   }
 
   // 成本歸因面板:診斷 + 最貴的輪 + 來源拆分 + 工具計數
@@ -1385,10 +1553,54 @@
       monModal.querySelectorAll('.mon-tab').forEach((b) => b.classList.toggle('active', b === btn));
       const v = btn.dataset.view;
       monUsageEl.classList.toggle('active', v === 'usage');
+      monLiveTabEl.classList.toggle('active', v === 'live');
       monDashEl.classList.toggle('active', v === 'dash');
       monSensEl.classList.toggle('active', v === 'sensitive');
+      if (v === 'live') monLoadLiveTab(); else monStopTabLive();
     });
   });
+
+  // 頂部 Live 分頁:自動鎖定「最近活動」的 session,全寬顯示其 live feed 並輪詢
+  function monStopTabLive() {
+    if (monTabLiveTimer) { clearInterval(monTabLiveTimer); monTabLiveTimer = null; }
+  }
+  async function monRenderLiveTabFor(sid) {
+    try {
+      const a = await apiFetch('/api/usage/' + encodeURIComponent(sid) + '/analysis').then((r) => r.json());
+      // 仍停在 Live 分頁才更新（使用者可能已切走）
+      if (!monLiveTabEl.classList.contains('active')) return;
+      monLiveTabEl.innerHTML = `<div class="livetab-wrap" data-sid="${monEsc(sid)}">`
+        + `<div class="livetab-bar">追蹤最近活動 session：<code>${monEsc(sid.slice(0, 8))}</code></div>`
+        + monRenderLive(a, { title: 'Live 逐輪（自動鎖定）' }) + '</div>';
+      if (!monIsActive(a)) monStopTabLive(); // 已 idle 就停輪詢(畫面保留)
+    } catch (err) {
+      if (err.message === 'unauthorized') return;
+      monLiveTabEl.innerHTML = '<div class="mon-empty">載入失敗：' + monEsc(err.message) + '</div>';
+    }
+  }
+  async function monLoadLiveTab() {
+    monStopTabLive();
+    monLiveTabEl.innerHTML = '<div style="color:#888;padding:8px">尋找最近活動 session…</div>';
+    let sessions = [];
+    try {
+      const usage = await apiFetch('/api/usage').then((r) => r.json());
+      sessions = usage.sessions || []; // 已按 lastTs desc 排序
+    } catch (err) {
+      if (err.message === 'unauthorized') return;
+      monLiveTabEl.innerHTML = '<div class="mon-empty">載入失敗：' + monEsc(err.message) + '</div>';
+      return;
+    }
+    const top = sessions[0];
+    if (!top) { monLiveTabEl.innerHTML = '<div class="mon-empty">尚無 session</div>'; return; }
+    await monRenderLiveTabFor(top.sessionId);
+    // 持續輪詢:每 4s 重新挑「最近活動」的 session 並刷新（最新 session 可能換人）
+    monTabLiveTimer = setInterval(async () => {
+      if (!monModal.classList.contains('visible') || !monLiveTabEl.classList.contains('active')) { monStopTabLive(); return; }
+      let s2 = [];
+      try { s2 = (await apiFetch('/api/usage').then((r) => r.json())).sessions || []; } catch { return; }
+      if (s2[0]) monRenderLiveTabFor(s2[0].sessionId);
+    }, 4000);
+  }
   document.getElementById('monitor-btn').addEventListener('click', openMonitor);
   document.getElementById('mon-close').addEventListener('click', closeMonitor);
   document.getElementById('mon-refresh').addEventListener('click', loadMonitor);
@@ -1403,6 +1615,8 @@
       monTotals.innerHTML = '<span style="color:#f48771">重審失敗：' + monEsc(err.message) + '</span>';
     }
   });
+
+  leafLiveInit(); // 焦點 session 即時 live 小面板（按鈕事件 + 還原開關狀態）
 
   // 週期刷新運行中 session 的 metadata；profile 不需高頻（鎖定中各自會 early-return）
   setInterval(refreshSessions, 3000);

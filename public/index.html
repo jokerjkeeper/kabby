@@ -327,6 +327,38 @@
     .term-pane.focused { border-color: #4ec9b0; }
     .term-pane .xterm { height: 100%; }
 
+    /* 焦點 session 右上角的即時 live 小面板（浮層,可收合）*/
+    .leaf-live {
+      position: absolute; top: 6px; right: 34px; z-index: 8;
+      width: 38px; max-height: calc(100% - 12px);
+      background: rgba(28,28,28,.96); border: 1px solid #3a3a3a; border-radius: 6px;
+      font-size: 11px; color: #ccc; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,.4);
+      transition: width .12s ease;
+    }
+    .leaf-live.expanded { width: 270px; display: flex; flex-direction: column; }
+    .leaf-live .ll-head {
+      display: flex; align-items: center; gap: 6px; padding: 5px 7px; cursor: pointer;
+      background: #232323; border-bottom: 1px solid #333; white-space: nowrap; user-select: none;
+    }
+    .leaf-live:not(.expanded) .ll-head { border-bottom: none; justify-content: center; padding: 5px 0; }
+    .leaf-live .ll-ico { flex: 0 0 auto; }
+    .leaf-live .ll-sum { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; font-family: 'Cascadia Code', Consolas, monospace; color: #aaa; }
+    .leaf-live:not(.expanded) .ll-sum, .leaf-live:not(.expanded) .ll-dot2 { display: none; }
+    .leaf-live .ll-dot2 { flex: 0 0 auto; color: #4caf50; }
+    .leaf-live.has-spike .ll-ico { filter: none; }
+    .leaf-live .ll-body { overflow: auto; max-height: 320px; }
+    .leaf-live:not(.expanded) .ll-body { display: none; }
+    .leaf-live .ll-row { padding: 4px 7px; border-bottom: 1px solid #242424; }
+    .leaf-live .ll-row.spike { background: #2a1d1d; border-left: 3px solid #e0533d; }
+    .leaf-live .ll-r1 { display: flex; gap: 5px; align-items: baseline; }
+    .leaf-live .ll-n { color: #888; font-family: 'Cascadia Code', Consolas, monospace; }
+    .leaf-live .ll-tools { color: #9cdcfe; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .leaf-live .ll-tools .h { color: #777; }
+    .leaf-live .ll-r2 { color: #999; font-family: 'Cascadia Code', Consolas, monospace; margin-top: 1px; }
+    .leaf-live .ll-r2 b { color: #ccc; } .leaf-live .ll-r2 b.hot { color: #ff8a6d; }
+    .leaf-live .ll-ing { color: #e0a04d; margin-top: 1px; }
+    .btn.tiny.on { background: #2d5a4a; color: #cdebdf; }
+
     /* 空 pane（split 出來、等待填 session） */
     .pane-empty {
       position: absolute;
@@ -524,6 +556,31 @@
     .mon-toolchips { display: flex; gap: 6px; flex-wrap: wrap; }
     .mon-toolchips .chip { font-size: 11px; background: #2a2a2a; color: #bbb; border-radius: 10px; padding: 2px 9px; }
     .mon-toolchips .chip b { color: #9cdcfe; }
+    /* 展開列:左歸因/對話 + 右 live feed */
+    .convo-body { display: flex; align-items: stretch; gap: 0; }
+    .convo-main { flex: 1 1 auto; min-width: 0; }
+    .convo-live { flex: 0 0 300px; border-left: 1px solid #333; background: #191919; max-height: 520px; overflow: auto; }
+    /* live feed（右側欄 / 頂部分頁共用）*/
+    .live-head { position: sticky; top: 0; background: #202020; color: #aaa; font-size: 11px; font-weight: 600; padding: 7px 10px; border-bottom: 1px solid #333; z-index: 1; }
+    .live-dot { color: #4caf50; font-weight: 600; }
+    .live-idle { color: #777; }
+    .live-list { padding: 4px 0; }
+    .live-row { padding: 6px 10px; border-bottom: 1px solid #242424; font-size: 11px; }
+    .live-row.spike { background: #2a1d1d; border-left: 3px solid #e0533d; }
+    .lr-head { display: flex; align-items: baseline; gap: 6px; }
+    .lr-n { color: #888; font-family: 'Cascadia Code', Consolas, monospace; flex: 0 0 auto; }
+    .lr-flag { flex: 0 0 auto; }
+    .lr-tools { color: #9cdcfe; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lr-tools .lh, .lr-tools .lh { color: #777; }
+    .lh { color: #777; }
+    .lr-tok { color: #999; margin-top: 2px; font-family: 'Cascadia Code', Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .lr-tok b { color: #ccc; }
+    .lr-tok b.hot { color: #ff8a6d; }
+    .lr-ingest { color: #e0a04d; margin-top: 2px; }
+    /* 頂部 Live 分頁 */
+    .livetab-bar { color: #aaa; font-size: 12px; padding: 8px 10px; border-bottom: 1px solid #333; }
+    .livetab-bar code { color: #9cdcfe; }
+    .livetab-wrap .live-list { max-width: 760px; }
     .mon-hit { padding: 6px 8px; border-bottom: 1px solid #2a2a2a; display: flex; gap: 10px; align-items: baseline; font-size: 12px; }
     .mon-hit .word { color: #ffd97a; font-weight: 600; font-family: 'Cascadia Code', Consolas, monospace; flex: 0 0 auto; }
     .mon-hit .role { color: #888; font-size: 10px; flex: 0 0 auto; }
@@ -600,6 +657,7 @@
       <div id="tab-list"></div>
       <div id="tab-empty">尚無已開啟的 tab — 從左側 sidebar 選 session attach</div>
       <span id="tab-hint">Ctrl+Shift+←/→ 切 tab · D/E 分割 · W 關 pane</span>
+      <button class="btn tiny" id="leaflive-btn" title="在焦點 session 右上角顯示即時 token / spike 小面板" style="margin-right:6px">Live面板</button>
       <button class="btn tiny" id="monitor-btn" title="監控：token 用量 / 對話 / 敏感詞" style="margin-right:6px">監控</button>
       <button class="btn tiny" id="lock-btn" title="鎖定（清掉本機 token、需重新輸入；不會關閉任何 session）" style="display:none; margin-right:6px">鎖定</button>
       <button class="btn tiny" id="help-btn" title="鍵盤快捷鍵與重繪 (F1)" style="margin-right:8px">?</button>
@@ -750,11 +808,13 @@
       <div class="monitor-totals" id="mon-totals"></div>
       <div class="monitor-tabs">
         <button class="mon-tab active" data-view="usage">Token 用量</button>
+        <button class="mon-tab" data-view="live">Live</button>
         <button class="mon-tab" data-view="dash">儀表板</button>
         <button class="mon-tab" data-view="sensitive">敏感詞 <span id="mon-sw-badge" class="badge warn" style="display:none"></span></button>
       </div>
       <div class="monitor-body">
         <div id="mon-usage" class="mon-view active"></div>
+        <div id="mon-livetab" class="mon-view"></div>
         <div id="mon-dash" class="mon-view"></div>
         <div id="mon-sensitive" class="mon-view"></div>
       </div>

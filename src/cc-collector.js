@@ -482,6 +482,9 @@ function buildAnalysis(sessionId, file, reqs) {
     totalUnits: Math.round(total),
     split, rawSplit, toolCounts,
     topByUnits, topByOutput, topByCacheCreate,
+    // 全輪明細(oldest-first),供 live 逐輪視圖。前端自行 reverse 顯示,並用
+    // turns[i-1].tools 算出「本輪 cacheCreate ← 上一輪工具的結果被 ingest」。
+    turns: reqs.map(slim),
     findings: diagnose(reqs, split, total, topByUnits),
   };
 }
@@ -508,10 +511,14 @@ function diagnose(reqs, split, total, topByUnits) {
     const med = cws[Math.floor(cws.length / 2)];
     const top = reqs.reduce((m, r) => (r.tokens.cacheCreate > m.tokens.cacheCreate ? r : m));
     if (med > 0 && top.tokens.cacheCreate >= Math.max(8000, med * 6)) {
-      const tool = top.tools[0];
+      // 歸因:本輪 cacheCreate 是「上一輪工具的結果」被 ingest 進 context,
+      // 所以兇手是上一輪(reqs 已按 order 排序,order===index)的工具,而非本輪。
+      const prev = reqs[top.order - 1];
+      const tool = (prev && prev.tools[0]) || top.tools[0];
+      const where = prev ? `第 ${prev.order + 1} 輪` : `第 ${top.order + 1} 輪`;
       findings.push({
         type: 'big-ingest', level: 'warn', title: '某輪吞入大量內容',
-        detail: `第 ${top.order + 1} 輪一次寫入 ${top.tokens.cacheCreate.toLocaleString()} cacheCreate token（中位數 ${med.toLocaleString()}）${tool ? `，觸發工具 ${tool.name}${tool.hint ? ' ' + tool.hint : ''}` : ''}。常見原因:讀大檔 / 把大段輸出塞進 context。`,
+        detail: `第 ${top.order + 1} 輪一次寫入 ${top.tokens.cacheCreate.toLocaleString()} cacheCreate token（中位數 ${med.toLocaleString()}）${tool ? `，來源是${where}的 ${tool.name}${tool.hint ? ' ' + tool.hint : ''} 結果` : ''}。常見原因:讀大檔 / 把大段輸出塞進 context。`,
       });
     }
   }
