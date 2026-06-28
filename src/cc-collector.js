@@ -450,8 +450,22 @@ function toolHint(input) {
 /** 把一個 session 的全部回應記錄聚成分析結果（純函數,供測試）。 */
 function buildAnalysis(sessionId, file, reqs) {
   reqs.sort((a, b) => a.order - b.order);
-  for (const r of reqs) r.units = unitsOf(r.tokens);
+  // 每輪相對單位(歸因排序) + 真實 $ (pricing.js,含 5m/1h 寫入費率差異)
+  const priceTable = pricing.load();
+  const rates = {};
+  for (const r of reqs) {
+    r.units = unitsOf(r.tokens);
+    r.costUsd = pricing.cost({ [r.model || '?']: {
+      input: r.tokens.input, output: r.tokens.output, cacheRead: r.tokens.cacheRead,
+      cacheCreate5m: r.cw5 || 0, cacheCreate1h: r.cw1 || 0,
+    } }, priceTable).usd;
+    if (r.model && !rates[r.model]) {
+      const rr = pricing.rateFor(r.model, priceTable);
+      if (rr) rates[r.model] = rr;
+    }
+  }
   const total = reqs.reduce((s, r) => s + r.units, 0) || 1;
+  const costUsd = reqs.reduce((s, r) => s + r.costUsd, 0);
   for (const r of reqs) r.pct = r.units / total;
 
   const split = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
@@ -469,7 +483,7 @@ function buildAnalysis(sessionId, file, reqs) {
 
   const slim = (r) => ({
     order: r.order, ts: r.ts, model: r.model, tokens: r.tokens,
-    units: Math.round(r.units), pct: r.pct, tools: r.tools, thinking: r.thinking,
+    units: Math.round(r.units), pct: r.pct, costUsd: r.costUsd, tools: r.tools, thinking: r.thinking,
   });
   const topByUnits = [...reqs].sort((a, b) => b.units - a.units).slice(0, 10).map(slim);
   const topByOutput = [...reqs].sort((a, b) => b.tokens.output - a.tokens.output).slice(0, 5).map(slim);
@@ -480,6 +494,8 @@ function buildAnalysis(sessionId, file, reqs) {
     requests: reqs.length,
     weights: COST_W,
     totalUnits: Math.round(total),
+    costUsd,   // 此 session(此檔,已去重)的等值 API 成本
+    rates,     // 各 model 的費率表(供前端費率參考)
     split, rawSplit, toolCounts,
     topByUnits, topByOutput, topByCacheCreate,
     // 全輪明細(oldest-first),供 live 逐輪視圖。前端自行 reverse 顯示,並用
@@ -557,6 +573,10 @@ function analyzeSession(sessionId) {
       let r = byReq.get(rid);
       if (!r) {
         const u = obj.message.usage || {};
+        const cc = u.cache_creation || {};
+        let c5 = cc.ephemeral_5m_input_tokens || 0;
+        let c1 = cc.ephemeral_1h_input_tokens || 0;
+        if (!c5 && !c1) c5 = u.cache_creation_input_tokens || 0; // 無拆分→當 5m
         r = {
           order: order++,
           ts: obj.timestamp || null,
@@ -567,6 +587,7 @@ function analyzeSession(sessionId) {
             cacheCreate: u.cache_creation_input_tokens || 0,
             cacheRead: u.cache_read_input_tokens || 0,
           },
+          cw5: c5, cw1: c1, // 供精確成本(5m/1h 寫入費率不同)
           tools: [],
           thinking: false,
         };

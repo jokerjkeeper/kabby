@@ -728,7 +728,7 @@
     const last = turns[turns.length - 1];
     const recentSpike = turns.slice(-6).some((t) => (t.tokens.cacheCreate || 0) > SPIKE_CW);
     el.classList.toggle('has-spike', recentSpike);
-    el.querySelector('.ll-sum').textContent = last ? `#${last.order + 1} cw${monFmtK(last.tokens.cacheCreate)}` : 'live';
+    el.querySelector('.ll-sum').textContent = last ? `#${last.order + 1} ${monFmtUsd(last.costUsd)}` : 'live';
     el.querySelector('.ll-ico').textContent = recentSpike ? '🔴' : '📊';
     const dot = el.querySelector('.ll-dot2');
     const act = monIsActive(a);
@@ -744,7 +744,7 @@
       const prev = turns[i - 1];
       const ing = spike && prev && prev.tools && prev.tools.length
         ? `<div class="ll-ing">↑ #${prev.order + 1} ${monEsc(prev.tools[0].name)} 結果</div>` : '';
-      rows.push(`<div class="ll-row${spike ? ' spike' : ''}"><div class="ll-r1"><span class="ll-n">#${t.order + 1}</span><span class="ll-tools">${spike ? '🔴 ' : ''}${tools}</span></div><div class="ll-r2">out <b>${monFmtK(t.tokens.output)}</b> · cw <b class="${spike ? 'hot' : ''}">${monFmtK(cw)}</b> · cr ${monFmtK(t.tokens.cacheRead)}</div>${ing}</div>`);
+      rows.push(`<div class="ll-row${spike ? ' spike' : ''}"><div class="ll-r1"><span class="ll-n">#${t.order + 1}</span><span class="ll-cost">${monFmtUsd(t.costUsd)}</span><span class="ll-tools">${spike ? '🔴 ' : ''}${tools}</span></div><div class="ll-r2">out <b>${monFmtK(t.tokens.output)}</b> · cw <b class="${spike ? 'hot' : ''}">${monFmtK(cw)}</b> · cr ${monFmtK(t.tokens.cacheRead)}</div>${ing}</div>`);
     }
     el.querySelector('.ll-body').innerHTML = rows.join('') || '<div style="padding:6px;color:#888">無逐輪資料</div>';
   }
@@ -1466,7 +1466,7 @@
     if (!a || !a.turns || !a.turns.length) return '<div class="mon-empty">無逐輪資料</div>';
     const turns = a.turns; // oldest-first
     const active = monIsActive(a);
-    const head = `<div class="live-head">${monEsc(opts.title || 'LIVE 逐輪')} · ${a.requests} 輪 `
+    const head = `<div class="live-head" title="費率 ${monEsc(monRateHint(a))}">${monEsc(opts.title || 'LIVE 逐輪')} · ${a.requests} 輪 · <span class="mon-cost">${monFmtUsd(a.costUsd)}</span> `
       + (active ? '<span class="live-dot">●live</span>' : '<span class="live-idle">idle</span>') + '</div>';
     const rows = [];
     for (let i = turns.length - 1; i >= 0; i--) {
@@ -1480,12 +1480,24 @@
         ? `<div class="lr-ingest">↑ 吞入 #${prev.order + 1} 的 ${monEsc(prev.tools[0].name)}${prev.tools[0].hint ? ' ' + monEsc(prev.tools[0].hint) : ''} 結果</div>`
         : '';
       rows.push(`<div class="live-row${spike ? ' spike' : ''}">
-        <div class="lr-head"><span class="lr-n">#${t.order + 1}</span>${spike ? '<span class="lr-flag">🔴</span>' : ''}<span class="lr-tools">${ownTools || '<span class="lh">(純文字)</span>'}</span></div>
+        <div class="lr-head"><span class="lr-n">#${t.order + 1}</span>${spike ? '<span class="lr-flag">🔴</span>' : ''}<span class="lr-cost">${monFmtUsd(t.costUsd)}</span><span class="lr-tools">${ownTools || '<span class="lh">(純文字)</span>'}</span></div>
         <div class="lr-tok">out <b>${monFmtK(t.tokens.output)}</b> · cw <b class="${spike ? 'hot' : ''}">${monFmtK(cw)}</b> · cr ${monFmtK(t.tokens.cacheRead)} · in ${monFmtK(t.tokens.input)}</div>
         ${ingest}
       </div>`);
     }
     return head + '<div class="live-list">' + rows.join('') + '</div>';
+  }
+
+  // 費率參考字串（USD / 1M token）。成本是「若走 API 計價」的等值,非真實帳單。
+  function monRateHint(a) {
+    const rates = (a && a.rates) || {};
+    const models = Object.keys(rates);
+    if (!models.length) return '';
+    return models.map((m) => {
+      const r = rates[m];
+      const short = m.replace('claude-', '');
+      return `${short}: in$${r.input} out$${r.output} cw5m$${r.cacheWrite5m} cw1h$${r.cacheWrite1h} cr$${r.cacheRead}`;
+    }).join(' ｜ ') + '（/1M token · 等值估算非帳單）';
   }
 
   // 成本歸因面板:診斷 + 最貴的輪 + 來源拆分 + 工具計數
@@ -1507,6 +1519,7 @@
         : (r.thinking ? '<span class="hint">(thinking / 純文字)</span>' : '<span class="hint">(純文字)</span>');
       return `<tr>
         <td class="l">#${r.order + 1}</td>
+        <td class="mon-cost">${monFmtUsd(r.costUsd)}</td>
         <td>${(r.pct * 100).toFixed(1)}%</td>
         <td>${monFmt(r.tokens.output)}</td>
         <td>${monFmt(r.tokens.cacheCreate)}</td>
@@ -1515,7 +1528,7 @@
       </tr>`;
     }).join('');
     const turnsTable = rows ? `<table class="mon-turns">
-      <thead><tr><th class="l">輪</th><th>佔比</th><th>Output</th><th>CacheCreate</th><th>CacheRead</th><th class="l">觸發工具</th></tr></thead>
+      <thead><tr><th class="l">輪</th><th>成本</th><th>佔比</th><th>Output</th><th>CacheCreate</th><th>CacheRead</th><th class="l">觸發工具</th></tr></thead>
       <tbody>${rows}</tbody></table>` : '';
 
     // 工具計數
@@ -1525,12 +1538,13 @@
       : '';
 
     return `<div class="mon-analysis">
-      <h4>診斷（${a.requests} 個回應 · 相對成本單位）</h4>
+      <h4>診斷（${a.requests} 個回應 · 此 session 等值成本 <span class="mon-cost">${monFmtUsd(a.costUsd)}</span>）</h4>
       ${findings}
       <h4>成本來源拆分</h4>
       ${splitHtml}
       <h4>最貴的輪</h4>
       ${turnsTable}
+      <div class="mon-rate-hint">費率 ${monEsc(monRateHint(a))}</div>
       ${chips ? '<h4>工具呼叫</h4>' + chips : ''}
     </div>`;
   }

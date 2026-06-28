@@ -145,7 +145,12 @@ function run() {
   assert.strictEqual(an.toolCounts.Edit, 1, '工具計數 Edit=1');
   assert.ok(an.findings.some((f) => f.type === 'big-ingest'), '應診斷出吞大檔');
   assert.ok(an.findings.some((f) => f.type === 'verbose'), 'output 佔比高應診斷囉嗦');
-  console.log('✓ A3. analyzeSession 歸因通過（排序 / 工具計數 / 診斷）');
+  // 每輪真實 $:req1 output 20000 × $25/1M + cacheRead 2000 × $0.5/1M = 0.5 + 0.001
+  assert.ok(typeof an.costUsd === 'number', '回傳 session costUsd');
+  assert.ok(an.rates['claude-opus-4-8'], '回傳費率表');
+  const r1 = an.turns.find((t) => t.order === 1);
+  assert.ok(Math.abs(r1.costUsd - 0.501) < 1e-6, `output 輪每輪 $ = 0.501,得 ${r1.costUsd}`);
+  console.log('✓ A3. analyzeSession 歸因通過（排序 / 工具計數 / 診斷 / 每輪$）');
 
   // buildView 過濾 + 聚合
   const idx2 = {
