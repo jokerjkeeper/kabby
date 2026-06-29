@@ -55,9 +55,12 @@
   let paneSeq = 0, tabSeq = 0;
   const MAX_PANES_PER_TAB = 4;
   let viewerConfigured = false;
-  const expandedProfiles = new Set();      // 哪些 profile 卡片是展開的
+  const expandedProfiles = new Set();      // 側欄哪些 profile 卡片是展開的
+  const expandedModalProfiles = new Set(); // 「全部項目」modal 裡哪些卡片展開（與側欄獨立）
   const historyCache = new Map();          // profileId → history array
-  let allProfiles = [];                    // 最近一次 fetch 的 profiles（sidebar 與 modal 共用）
+  let allProfiles = [];                    // 最近一次抓到的完整項目清單（sidebar 與 modal 共用）
+  let projectsView = localStorage.getItem('kabby-projects-view') || 'grid';  // modal 版型：'grid' | 'list'
+  const RECENT_DAYS = 7;                    // 側欄只顯示 N 天內用過的項目，其餘收進「全部項目」modal
 
   // ──────────────────────────────────────────────────────────────────────
   // DOM refs
@@ -76,6 +79,10 @@
   const tabListEl = document.getElementById('tab-list');
   const tabEmptyEl = document.getElementById('tab-empty');
   const helpModal = document.getElementById('help-modal');
+  const projectsModal = document.getElementById('projects-modal');
+  const apSearchEl = document.getElementById('ap-search');
+  const apGridBtn = document.getElementById('ap-grid');
+  const apListBtn = document.getElementById('ap-list');
 
   // ──────────────────────────────────────────────────────────────────────
   // Helpers
@@ -202,14 +209,35 @@
   }
 
   function renderProfiles(profiles) {
+    allProfiles = profiles;
     if (!profiles.length) {
       profileListEl.innerHTML = '<div class="empty-hint">尚無項目。點右上「+ 項目」建立。</div>';
       return;
     }
     profileListEl.innerHTML = '';
-    for (const p of profiles) {
+    const recent = profiles.filter(isRecentProfile);
+    if (!recent.length) {
+      const hint = document.createElement('div');
+      hint.className = 'empty-hint';
+      hint.textContent = `近 ${RECENT_DAYS} 天沒有活動的項目。點下方「全部項目」找。`;
+      profileListEl.appendChild(hint);
+    }
+    for (const p of recent) {
       profileListEl.appendChild(createProfileCard(p, expandedProfiles, toggleProfile));
     }
+
+    // 「全部項目」入口：開 modal（grid/list + 搜尋）
+    const more = document.createElement('button');
+    more.className = 'btn tiny';
+    more.id = 'open-all-projects';
+    more.style.cssText = 'display:block; width:calc(100% - 12px); margin:6px; text-align:center;';
+    more.textContent = `📁 全部項目 (${profiles.length})`;
+    more.title = '開啟所有項目（可搜尋、grid/list 切換、展開歷史接續舊 session）';
+    more.addEventListener('click', openProjectsModal);
+    profileListEl.appendChild(more);
+
+    // modal 開著時，資料刷新（busy/最近時間變動）也同步重繪
+    if (projectsModal && projectsModal.classList.contains('visible')) renderProjectsModal();
   }
 
   async function toggleProfile(id) {
@@ -286,8 +314,13 @@
     for (const h of history) {
       const item = document.createElement('div');
       item.className = 'history-item' + (h.busy ? ' busy' : '');
+      // 有 /rename 自訂名 → 名字當主標、首句摘要降級為副標；沒有就照舊只顯示摘要
+      const titleRow = h.title
+        ? `<div class="summary"><span class="title">${escapeHtml(h.title)}</span> <span class="badge named" title="cc /rename 設定的名稱">named</span></div>
+           <div class="meta" style="color:#666">${escapeHtml(h.summary || '(無摘要)')}</div>`
+        : `<div class="summary">${escapeHtml(h.summary || '(無摘要)')}</div>`;
       item.innerHTML = `
-        <div class="summary">${escapeHtml(h.summary || '(無摘要)')}</div>
+        ${titleRow}
         <div class="meta">
           <span>${escapeHtml(timeAgo(new Date(h.mtime).toISOString()))}</span>
           <span>·</span>
@@ -316,6 +349,7 @@
       // 新 PTY 上線 → busy set 變了，清 history cache 讓展開的歷史列表反映
       historyCache.clear();
       await Promise.all([refreshProfiles(), refreshSessions()]);
+      if (projectsModal.classList.contains('visible')) closeProjectsModal();
       openSession(json.id, json);
     } catch (err) {
       alert('啟動失敗：' + err.message);
@@ -1257,13 +1291,14 @@
   // Modal 鍵盤 (ESC / Enter) — modal 開啟時優先處理
   document.addEventListener('keydown', (e) => {
     const monModalEl = document.getElementById('monitor-modal');
-    const inModal = sm.modal.classList.contains('visible') || pm.modal.classList.contains('visible') || helpModal.classList.contains('visible') || monModalEl.classList.contains('visible');
+    const inModal = sm.modal.classList.contains('visible') || pm.modal.classList.contains('visible') || helpModal.classList.contains('visible') || monModalEl.classList.contains('visible') || projectsModal.classList.contains('visible');
     if (!inModal) return;
     if (e.key === 'Escape') {
       if (sm.modal.classList.contains('visible')) smClose();
       if (pm.modal.classList.contains('visible')) pmClose();
       if (helpModal.classList.contains('visible')) closeHelp();
       if (monModalEl.classList.contains('visible')) monModalEl.classList.remove('visible');
+      if (projectsModal.classList.contains('visible')) closeProjectsModal();
     } else if (e.key === 'Enter') {
       if (sm.modal.classList.contains('visible')) smSubmit();
       else if (pm.modal.classList.contains('visible')) pmSubmit();
@@ -1743,6 +1778,13 @@
   }
   document.getElementById('monitor-btn').addEventListener('click', openMonitor);
   document.getElementById('mon-close').addEventListener('click', closeMonitor);
+
+  // 「全部項目」modal 控制
+  document.getElementById('ap-close').addEventListener('click', closeProjectsModal);
+  projectsModal.addEventListener('click', (e) => { if (e.target === projectsModal) closeProjectsModal(); });
+  apGridBtn.addEventListener('click', () => setProjectsView('grid'));
+  apListBtn.addEventListener('click', () => setProjectsView('list'));
+  apSearchEl.addEventListener('input', renderProjectsModal);
   document.getElementById('mon-refresh').addEventListener('click', loadMonitor);
   document.getElementById('mon-rebuild').addEventListener('click', async () => {
     if (!confirm('重審歷史：砍索引從頭全掃，重新計算所有既有對話的 token/成本（套用 requestId 去重修正，數字會校正到正確值）並套用目前敏感詞庫。資料量大時較久，確定？')) return;

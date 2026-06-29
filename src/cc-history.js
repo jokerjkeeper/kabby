@@ -49,14 +49,19 @@ async function listHistory(cwd) {
     const sessionId = ent.name.replace(/\.jsonl$/, '');
     let summary = '';
     let firstUserAt = null;
+    let title = null;
     try {
       const meta = await readFirstUserMessage(full);
       summary = meta.summary;
       firstUserAt = meta.timestamp;
     } catch {}
+    try {
+      title = await readCustomTitle(full, stat.size);   // cc `/rename` 的名字（若有）
+    } catch {}
     out.push({
       sessionId,
       file: full,
+      title: title || null,               // /rename 設的自訂名；null = 沒 rename 過
       summary: summary || '(empty)',
       firstUserAt,
       mtime: stat.mtimeMs,
@@ -101,6 +106,32 @@ function readFirstUserMessage(filePath) {
     });
     rl.on('close', () => { if (!resolved) resolve({ summary: '', timestamp: null }); });
     rl.on('error', reject);
+  });
+}
+
+// cc 的 `/rename` 會往 jsonl 追加一行 {"type":"custom-title","customTitle":"..."}。
+// rename 通常在對話後段才下，這行落在檔尾，所以只讀檔尾 TAIL_BYTES，不整檔掃（大檔也是固定成本）。
+// 取最後一個 custom-title（多次 rename 用最新）。
+const TAIL_BYTES = 64 * 1024;
+
+function readCustomTitle(filePath, fileSize) {
+  return new Promise((resolve) => {
+    const start = Math.max(0, (fileSize || 0) - TAIL_BYTES);
+    const stream = fs.createReadStream(filePath, { encoding: 'utf8', start });
+    const rl = readline.createInterface({ input: stream });
+    let title = null;
+    let skipFirst = start > 0;   // 非從頭讀時，第一行可能是被截斷的半行，跳過
+    rl.on('line', (line) => {
+      if (skipFirst) { skipFirst = false; return; }
+      if (line.indexOf('"custom-title"') === -1) return;   // 便宜的預過濾，避免每行都 JSON.parse
+      let obj;
+      try { obj = JSON.parse(line); } catch { return; }
+      if (obj && obj.type === 'custom-title' && obj.customTitle) {
+        title = String(obj.customTitle);
+      }
+    });
+    rl.on('close', () => resolve(title));
+    rl.on('error', () => resolve(null));
   });
 }
 

@@ -468,6 +468,31 @@
     .chip.active { background: #094771; color: #fff; border-color: #0e639c; }
     .chip.active:hover { background: #0e639c; }
 
+    /* ── 全部項目（modal overlay：搜尋 + grid/list）──────────────── */
+    /* z-index 比表單 modal（100）低，讓卡片內「編輯」開的項目表單疊在它上面 */
+    #projects-modal { z-index: 95; }
+    .modal.projects {
+      min-width: 0; width: 82vw; max-width: 1040px; height: 82vh;
+      display: flex; flex-direction: column; padding: 16px 18px;
+    }
+    .projects-head { display: flex; align-items: center; gap: 12px; }
+    .projects-head h2 { margin: 0; white-space: nowrap; }
+    .projects-head h2 small { color: #888; font-weight: 400; font-size: 11px; margin-left: 6px; }
+    .projects-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .projects-actions #ap-search { width: 230px; margin: 0; }
+    .ap-view-toggle { display: flex; gap: 2px; }
+    .ap-view-toggle .btn.tiny.active { background: #094771; color: #fff; border-color: #0e639c; }
+    .projects-body { flex: 1; overflow-y: auto; margin-top: 12px; padding-right: 2px; }
+    .projects-body.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; align-content: start; }
+    .projects-body.list { display: flex; flex-direction: column; gap: 6px; }
+    /* modal 內複用 .profile-card，但拿掉側欄用的外距 */
+    .projects-body .profile-card { margin: 0; }
+    .projects-body.list .profile-card .profile-meta { display: inline-block; margin-right: 12px; }
+    .ap-empty { color: #777; font-size: 12px; padding: 28px; text-align: center; }
+    /* /rename 自訂名標記 */
+    .history-item .title { color: #6cc04a; font-weight: 600; }
+    .history-item .badge.named { background: #20402a; color: #8fdca0; }
+
     /* Help modal kbd 樣式 */
     #help-modal kbd {
       background: #1e1e1e;
@@ -708,7 +733,7 @@
 
       <label for="sm-args">啟動參數（進階，可留空）</label>
       <input id="sm-args" type="text" placeholder="預設：--dangerously-skip-permissions" autocomplete="off" />
-      <div class="hint">以空格分隔。留空 = 預設 <code>--dangerously-skip-permissions</code>；想「無參數」填單一空格。</div>
+      <div class="hint" id="sm-args-hint">Space-separated args. Leave empty to use the provider default; enter a single space to force no args.</div>
       <div class="chip-row" id="sm-arg-chips">
         <button type="button" class="chip" data-flag="--dangerously-skip-permissions">--dangerously-skip-permissions</button>
         <button type="button" class="chip" data-flag="--verbose">--verbose</button>
@@ -783,6 +808,7 @@
 
       <label for="pm-args">啟動參數（進階，可留空）</label>
       <input id="pm-args" type="text" placeholder="預設：--dangerously-skip-permissions" autocomplete="off" />
+      <div class="hint" id="pm-args-hint">Leave empty to use the provider default; enter a single space to force no args.</div>
       <div class="chip-row" id="pm-arg-chips">
         <button type="button" class="chip" data-flag="--dangerously-skip-permissions">--dangerously-skip-permissions</button>
         <button type="button" class="chip" data-flag="--verbose">--verbose</button>
@@ -838,6 +864,24 @@
         <div id="mon-dash" class="mon-view"></div>
         <div id="mon-sensitive" class="mon-view"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- Modal: 全部項目（搜尋 + grid/list，卡片可展開歷史） -->
+  <div class="modal-backdrop" id="projects-modal">
+    <div class="modal projects">
+      <div class="projects-head">
+        <h2>全部項目 <small id="ap-count"></small></h2>
+        <div class="projects-actions">
+          <input id="ap-search" type="text" placeholder="搜尋名稱 / 路徑…" autocomplete="off" spellcheck="false" />
+          <div class="ap-view-toggle">
+            <button class="btn tiny" id="ap-grid" title="格狀檢視">▦ 格狀</button>
+            <button class="btn tiny" id="ap-list" title="條列檢視">☰ 條列</button>
+          </div>
+          <button class="btn" id="ap-close">關閉</button>
+        </div>
+      </div>
+      <div class="projects-body" id="ap-body"></div>
     </div>
   </div>
 
