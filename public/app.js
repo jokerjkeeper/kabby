@@ -1,6 +1,24 @@
 /* kabby Web UI — SPA (Phase 2.5 with profiles) */
 (() => {
   const API = '';
+  const PROVIDER_UI = {
+    claude: {
+      cmdPlaceholder: '預設：claude.cmd（Win）/ claude（Unix）',
+      cmdHint: '想跑別的 shell（如 cmd.exe / bash）才填。',
+      argsPlaceholder: '預設：--dangerously-skip-permissions',
+      argsHint: 'Space-separated args. Leave empty to use the provider default; enter a single space to force no args.',
+      chips: ['--dangerously-skip-permissions', '--verbose', '--enable-auto-mode', '--debug'],
+      defaultArgsText: '--dangerously-skip-permissions',
+    },
+    codex: {
+      cmdPlaceholder: '預設：codex.cmd（Win）/ codex（Unix）',
+      cmdHint: '通常留空即可；只有要覆蓋成別的執行檔才填。',
+      argsPlaceholder: '預設：無參數',
+      argsHint: 'Codex 預設不帶參數；目前只提供 --full-auto 作為可選項。',
+      chips: ['--full-auto'],
+      defaultArgsText: '',
+    },
+  };
   let authToken = localStorage.getItem('kabby-auth-token') || '';
   let locked = false;            // 鎖定中（已清 token、登入頁蓋著），不關閉 session
   let authRequired = false;      // daemon 是否設了 AUTH_TOKEN（由 /api/health 得知）
@@ -82,6 +100,33 @@
     if (!trimmed) return undefined;
     return trimmed.split(/\s+/);
   }
+  function providerUi(provider) {
+    return PROVIDER_UI[provider] || PROVIDER_UI.claude;
+  }
+  function arraysEqual(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+  function syncProviderArgsUi(form) {
+    const ui = providerUi(form.provider.value || 'claude');
+    form.cmd.placeholder = ui.cmdPlaceholder;
+    if (form.cmdHint) form.cmdHint.textContent = ui.cmdHint;
+    form.args.placeholder = ui.argsPlaceholder;
+    if (form.argsHint) form.argsHint.textContent = ui.argsHint;
+    const tokens = form.args.value.trim() ? form.args.value.trim().split(/\s+/) : [];
+    if (form.provider.value === 'codex' && arraysEqual(tokens, PROVIDER_UI.claude.chips)) {
+      form.args.value = '';
+    }
+    const activeTokens = form.args.value.trim() ? form.args.value.trim().split(/\s+/) : [];
+    const hideChips = !ui.chips.length;
+    form.chips.style.display = hideChips ? 'none' : '';
+    for (const c of form.chips.querySelectorAll('.chip')) {
+      const supported = ui.chips.includes(c.dataset.flag);
+      c.style.display = supported ? '' : 'none';
+      c.classList.toggle('active', supported && activeTokens.includes(c.dataset.flag));
+    }
+  }
 
   // ──────────────────────────────────────────────────────────────────────
   // Profiles
@@ -99,6 +144,60 @@
     } catch {
       return [];
     }
+  }
+
+  // 該項目是否「近期」：busy（運行中）永遠算近期，否則看 lastUsedAt 是否在 RECENT_DAYS 內
+  function isRecentProfile(p) {
+    if (p.lastSessionBusy) return true;
+    if (!p.lastUsedAt) return false;
+    return (Date.now() - new Date(p.lastUsedAt).getTime()) < RECENT_DAYS * 86_400_000;
+  }
+
+  // 建一張項目卡片。側欄與 modal 共用；用 expandedSet / onToggle 區分各自的展開狀態。
+  function createProfileCard(p, expandedSet, onToggle) {
+    const card = document.createElement('div');
+    card.className = 'profile-card' + (expandedSet.has(p.id) ? ' expanded' : '');
+    card.dataset.id = p.id;
+
+    const head = document.createElement('div');
+    head.className = 'profile-head';
+    head.innerHTML = `
+      <div class="profile-name">
+        <span>${escapeHtml(p.name)}</span>
+        ${p.lastSessionBusy ? '<span class="badge warn">last 掛載中</span>' : ''}
+      </div>
+      <div class="profile-meta">${escapeHtml(shorten(p.cwd, 38))}</div>
+      <div class="profile-meta">最近：${escapeHtml(timeAgo(p.lastUsedAt))}</div>
+    `;
+    head.addEventListener('click', () => onToggle(p.id));
+    card.appendChild(head);
+
+    const body = document.createElement('div');
+    body.className = 'profile-body';
+    body.innerHTML = `
+      <div class="profile-actions">
+        <button class="btn primary tiny" data-action="new-chat">新對話</button>
+        <button class="btn tiny" data-action="resume-last" ${(p.resumeSupported && p.lastSessionId && !p.lastSessionBusy) ? '' : 'disabled'}>接續上次</button>
+        <button class="btn tiny" data-action="edit">編輯</button>
+        <button class="btn tiny" data-action="open-folder" ${p.historySupported ? '' : 'disabled'}>歷史目錄</button>
+        <button class="btn danger tiny" data-action="delete">刪除</button>
+      </div>
+      <div class="history-list" data-history-list>
+        <div class="empty">${p.historySupported ? '點開項目自動讀取歷史…' : '此 provider 尚未接入對話歷史。'}</div>
+      </div>
+    `;
+    card.appendChild(body);
+
+    body.querySelector('[data-action="new-chat"]').addEventListener('click', (e) => { e.stopPropagation(); launchProfile(p.id); });
+    body.querySelector('[data-action="resume-last"]').addEventListener('click', (e) => { e.stopPropagation(); if (p.resumeSupported && p.lastSessionId) launchProfile(p.id, p.lastSessionId); });
+    body.querySelector('[data-action="edit"]').addEventListener('click', (e) => { e.stopPropagation(); openProfileModal(p); });
+    body.querySelector('[data-action="open-folder"]').addEventListener('click', (e) => { e.stopPropagation(); openHistoryFolder(p.id); });
+    body.querySelector('[data-action="delete"]').addEventListener('click', (e) => { e.stopPropagation(); deleteProfile(p.id, p.name); });
+
+    if (expandedSet.has(p.id)) {
+      renderHistoryList(p.id, body.querySelector('[data-history-list]'));
+    }
+    return card;
   }
 
   function renderProfiles(profiles) {
@@ -157,20 +256,73 @@
   }
 
   async function toggleProfile(id) {
+    const profile = allProfiles.find((p) => p.id === id);
     if (expandedProfiles.has(id)) {
       expandedProfiles.delete(id);
     } else {
       expandedProfiles.add(id);
-      await fetchHistory(id);     // 預先抓
+      if (!profile || profile.historySupported) await fetchHistory(id);     // 預先抓
     }
     await refreshProfiles();
+  }
+
+  // ── 「全部項目」modal ──────────────────────────────────────────────
+  async function toggleModalProfile(id) {
+    const profile = allProfiles.find((p) => p.id === id);
+    if (expandedModalProfiles.has(id)) {
+      expandedModalProfiles.delete(id);
+    } else {
+      expandedModalProfiles.add(id);
+      if (!profile || profile.historySupported) await fetchHistory(id);
+    }
+    renderProjectsModal();
+  }
+
+  function renderProjectsModal() {
+    const body = document.getElementById('ap-body');
+    if (!body) return;
+    const q = (apSearchEl.value || '').trim().toLowerCase();
+    let list = allProfiles;
+    if (q) {
+      list = list.filter((p) =>
+        (p.name || '').toLowerCase().includes(q) || (p.cwd || '').toLowerCase().includes(q));
+    }
+    document.getElementById('ap-count').textContent =
+      q ? `(${list.length} / ${allProfiles.length})` : `(${allProfiles.length})`;
+    apGridBtn.classList.toggle('active', projectsView === 'grid');
+    apListBtn.classList.toggle('active', projectsView === 'list');
+    body.className = 'projects-body ' + projectsView;
+    body.innerHTML = '';
+    if (!list.length) {
+      body.innerHTML = '<div class="ap-empty">沒有符合的項目。</div>';
+      return;
+    }
+    for (const p of list) {
+      body.appendChild(createProfileCard(p, expandedModalProfiles, toggleModalProfile));
+    }
+  }
+
+  function openProjectsModal() {
+    projectsModal.classList.add('visible');
+    renderProjectsModal();
+    apSearchEl.focus();
+    apSearchEl.select();
+  }
+  function closeProjectsModal() { projectsModal.classList.remove('visible'); }
+  function setProjectsView(v) {
+    projectsView = v;
+    try { localStorage.setItem('kabby-projects-view', v); } catch {}
+    renderProjectsModal();
   }
 
   async function renderHistoryList(profileId, container) {
     let history = historyCache.get(profileId);
     if (!history) history = await fetchHistory(profileId);
     if (!history.length) {
-      container.innerHTML = '<div class="empty">此目錄無 cc 對話歷史。</div>';
+      const profile = allProfiles.find((p) => p.id === profileId);
+      container.innerHTML = profile && !profile.historySupported
+        ? '<div class="empty">此 provider 尚未接入對話歷史。</div>'
+        : '<div class="empty">此目錄目前無可接續的對話歷史。</div>';
       return;
     }
     container.innerHTML = '';
@@ -216,8 +368,12 @@
   async function openHistoryFolder(profileId) {
     try {
       const info = await apiFetch('/api/profiles/' + encodeURIComponent(profileId) + '/history-dir').then((r) => r.json());
+      if (info.unsupported) {
+        alert('此 provider 目前尚未支援歷史目錄。');
+        return;
+      }
       if (!info.exists) {
-        alert('該 cwd 在 cc 還沒有對話歷史目錄。\n預期位置：' + info.dir);
+        alert('該 cwd 目前還沒有對話歷史目錄。\n預期位置：' + info.dir);
         return;
       }
       await apiFetch('/api/viewer/open-folder', {
@@ -941,19 +1097,21 @@
     name: document.getElementById('sm-name'),
     cwd: document.getElementById('sm-cwd'),
     cmd: document.getElementById('sm-cmd'),
+    cmdHint: document.getElementById('sm-cmd-hint'),
     args: document.getElementById('sm-args'),
+    argsHint: document.getElementById('sm-args-hint'),
     err: document.getElementById('sm-error'),
     submit: document.getElementById('sm-submit'),
     chips: document.getElementById('sm-arg-chips'),
   };
   function smOpen() {
     sm.err.textContent = '';
-    smSyncChips();
+    syncProviderArgsUi(sm);
     sm.modal.classList.add('visible');
     setTimeout(() => sm.name.focus(), 50);
   }
   function smClose() { sm.modal.classList.remove('visible'); }
-  function smReset() { sm.name.value = sm.cwd.value = sm.cmd.value = sm.args.value = ''; smSyncChips(); }
+  function smReset() { sm.provider.value = 'claude'; sm.name.value = sm.cwd.value = sm.cmd.value = sm.args.value = ''; syncProviderArgsUi(sm); }
   function smTokens() { return sm.args.value.trim() ? sm.args.value.trim().split(/\s+/) : []; }
   function smSyncChips() {
     const set = new Set(smTokens());
@@ -963,9 +1121,10 @@
     const chip = e.target.closest('.chip'); if (!chip) return;
     const flag = chip.dataset.flag; const t = smTokens(); const i = t.indexOf(flag);
     if (i === -1) t.push(flag); else t.splice(i, 1);
-    sm.args.value = t.join(' '); smSyncChips();
+    sm.args.value = t.join(' '); syncProviderArgsUi(sm);
   });
-  sm.args.addEventListener('input', smSyncChips);
+  sm.args.addEventListener('input', () => syncProviderArgsUi(sm));
+  sm.provider.addEventListener('change', () => syncProviderArgsUi(sm));
 
   async function smSubmit() {
     const name = sm.name.value.trim();
@@ -1004,7 +1163,9 @@
     name: document.getElementById('pm-name'),
     cwd: document.getElementById('pm-cwd'),
     cmd: document.getElementById('pm-cmd'),
+    cmdHint: document.getElementById('pm-cmd-hint'),
     args: document.getElementById('pm-args'),
+    argsHint: document.getElementById('pm-args-hint'),
     err: document.getElementById('pm-error'),
     submit: document.getElementById('pm-submit'),
     del: document.getElementById('pm-delete'),
@@ -1027,7 +1188,7 @@
       pm.name.value = pm.cwd.value = pm.cmd.value = pm.args.value = '';
       pm.del.style.display = 'none';
     }
-    pmSyncChips();
+    syncProviderArgsUi(pm);
     pm.modal.classList.add('visible');
     setTimeout(() => pm.name.focus(), 50);
   }
@@ -1041,9 +1202,10 @@
     const chip = e.target.closest('.chip'); if (!chip) return;
     const flag = chip.dataset.flag; const t = pmTokens(); const i = t.indexOf(flag);
     if (i === -1) t.push(flag); else t.splice(i, 1);
-    pm.args.value = t.join(' '); pmSyncChips();
+    pm.args.value = t.join(' '); syncProviderArgsUi(pm);
   });
-  pm.args.addEventListener('input', pmSyncChips);
+  pm.args.addEventListener('input', () => syncProviderArgsUi(pm));
+  pm.provider.addEventListener('change', () => syncProviderArgsUi(pm));
 
   async function pmSubmit() {
     const name = pm.name.value.trim();
@@ -1052,8 +1214,8 @@
     if (!cwd) { pm.err.textContent = '請輸入工作目錄'; return; }
     const body = { name, cwd };
     if (pm.cmd.value.trim()) body.cmd = pm.cmd.value.trim();
-    const args = parseArgsRaw(pm.args.value);
-    if (args !== undefined) body.args = args;
+    const args = pm.args.value.trim() ? parseArgsRaw(pm.args.value) : [];
+    body.args = args;
     pm.submit.disabled = true; pm.err.textContent = '';
     try {
       const path = pm.editingId
@@ -1647,3 +1809,16 @@
   }
   boot();
 })();
+
+
+
+
+
+
+
+
+
+
+
+
+

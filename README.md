@@ -114,3 +114,10 @@ PLAN.md            — 設計決策與 Phase 1-4 詳細規劃
 ## 跟 ai-terminal 的關係
 
 kabby 是新專案，**不修改** `D:\Git\aiterm-repo\class\ai-terminal\tool\`。差異對照見 [`reference/from-ai-terminal/README.md`](./reference/from-ai-terminal/README.md)。
+
+
+## Provider Setup
+
+- `claude`: keeps the existing history resume, viewer, and monitoring integrations.
+- `codex`: can now be created from the Web UI as a session or profile and attached normally; history resume and viewer are not wired yet.
+- Both `+ Project` and `+ Temp` now include a provider picker, so you do not need to hand-edit `cmd` to launch Codex.

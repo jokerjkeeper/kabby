@@ -697,7 +697,7 @@
 
       <label for="sm-cmd">執行檔（進階，可留空）</label>
       <input id="sm-cmd" type="text" placeholder="預設：claude.cmd（Win）/ claude（Unix）" autocomplete="off" />
-      <div class="hint">想跑別的 shell（如 <code>cmd.exe</code> / <code>bash</code>）才填。</div>
+      <div class="hint" id="sm-cmd-hint">想跑別的 shell（如 <code>cmd.exe</code> / <code>bash</code>）才填。</div>
 
       <label for="sm-args">啟動參數（進階，可留空）</label>
       <input id="sm-args" type="text" placeholder="預設：--dangerously-skip-permissions" autocomplete="off" />
@@ -707,6 +707,7 @@
         <button type="button" class="chip" data-flag="--verbose">--verbose</button>
         <button type="button" class="chip" data-flag="--enable-auto-mode">--enable-auto-mode</button>
         <button type="button" class="chip" data-flag="--debug">--debug</button>
+        <button type="button" class="chip" data-flag="--full-auto">--full-auto</button>
       </div>
 
       <div class="error" id="sm-error"></div>
@@ -764,6 +765,7 @@
 
       <label for="pm-cmd">執行檔（進階，可留空）</label>
       <input id="pm-cmd" type="text" placeholder="預設：claude.cmd（Win）/ claude（Unix）" autocomplete="off" />
+      <div class="hint" id="pm-cmd-hint">想跑別的 shell（如 <code>cmd.exe</code> / <code>bash</code>）才填。</div>
 
       <label for="pm-args">啟動參數（進階，可留空）</label>
       <input id="pm-args" type="text" placeholder="預設：--dangerously-skip-permissions" autocomplete="off" />
@@ -772,6 +774,7 @@
         <button type="button" class="chip" data-flag="--verbose">--verbose</button>
         <button type="button" class="chip" data-flag="--enable-auto-mode">--enable-auto-mode</button>
         <button type="button" class="chip" data-flag="--debug">--debug</button>
+        <button type="button" class="chip" data-flag="--full-auto">--full-auto</button>
       </div>
 
       <div class="error" id="pm-error"></div>
@@ -831,3 +834,5 @@
   <script src="/app.js"></script>
 </body>
 </html>
+
+

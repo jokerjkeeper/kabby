@@ -10,6 +10,7 @@ const profileStore = require('./profile-store');
 const ccHistory = require('./cc-history');
 const ccCollector = require('./cc-collector');
 const usageWatcher = require('./usage-watcher');
+const providers = require('./providers');
 
 // 載入專案根目錄的 .env（Node 20.12+ 內建 loadEnvFile，零依賴）；檔案不存在或舊版 node 則略過
 if (typeof process.loadEnvFile === 'function') {
@@ -61,15 +62,27 @@ app.use('/api', (req, res, next) => {
   res.status(401).json({ error: 'unauthorized' });
 });
 
+app.get('/api/providers', (req, res) => {
+  res.json(providers.listProviders());
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 // Profiles
 // ──────────────────────────────────────────────────────────────────────────
 app.get('/api/profiles', (req, res) => {
-  const busy = registry.busyCcSessionIds();
-  const profiles = profileStore.list().map((p) => ({
-    ...p,
-    lastSessionBusy: p.lastSessionId ? busy.has(p.lastSessionId) : false,
-  }));
+  const profiles = profileStore.list().map((p) => {
+    const provider = providers.getProvider(p.provider);
+    const busy = registry.busyResumeSessionIds(provider.id);
+    return {
+      ...p,
+      provider: provider.id,
+      providerLabel: provider.label,
+      historySupported: provider.historySupported,
+      resumeSupported: provider.resumeSupported,
+      viewerSupported: provider.viewerSupported,
+      lastSessionBusy: provider.resumeSupported && p.lastSessionId ? busy.has(p.lastSessionId) : false,
+    };
+  });
   res.json(profiles);
 });
 
@@ -101,9 +114,11 @@ app.delete('/api/profiles/:id', (req, res) => {
 app.get('/api/profiles/:id/history', async (req, res) => {
   const profile = profileStore.get(req.params.id);
   if (!profile) return res.status(404).json({ error: 'profile not found' });
+  const provider = providers.getProvider(profile.provider);
+  if (!provider.historySupported) return res.json([]);
   try {
     const history = await ccHistory.listHistory(profile.cwd);
-    const busy = registry.busyCcSessionIds();
+    const busy = registry.busyResumeSessionIds(provider.id);
     res.json(history.map((h) => ({ ...h, busy: busy.has(h.sessionId) })));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -113,28 +128,37 @@ app.get('/api/profiles/:id/history', async (req, res) => {
 app.get('/api/profiles/:id/history-dir', (req, res) => {
   const profile = profileStore.get(req.params.id);
   if (!profile) return res.status(404).json({ error: 'profile not found' });
+  const provider = providers.getProvider(profile.provider);
+  if (!provider.historySupported) {
+    return res.json({ dir: null, exists: false, unsupported: true, provider: provider.id });
+  }
   const dir = ccHistory.projectDir(profile.cwd);
-  res.json({ dir, exists: fs.existsSync(dir) });
+  res.json({ dir, exists: fs.existsSync(dir), provider: provider.id });
 });
 
 app.post('/api/profiles/:id/launch', (req, res) => {
   const profile = profileStore.get(req.params.id);
   if (!profile) return res.status(404).json({ error: 'profile not found' });
+  const provider = providers.getProvider(profile.provider);
   const { resume, sessionName } = req.body || {};
 
-  // 衝突檢查：要 resume 的 cc session id 是否已被 running PTY 佔用
+  if (resume && !provider.resumeSupported) {
+    return res.status(400).json({ error: `${provider.label} 尚未支援 history resume` });
+  }
+
+  // 衝突檢查：要 resume 的歷史 session id 是否已被 running PTY 佔用
   if (resume) {
-    const busy = registry.busyCcSessionIds();
+    const busy = registry.busyResumeSessionIds(provider.id);
     if (busy.has(resume)) {
       return res.status(409).json({
-        error: `cc session ${resume} 已被另一個 kabby session 掛載中，不能同時雙開驅動。`,
+        error: `${provider.label} history session ${resume} 已被另一個 kabby session 掛載中，不能同時雙開驅動。`,
       });
     }
   }
 
   // 組裝 args
-  const baseArgs = Array.isArray(profile.args) ? [...profile.args] : ['--dangerously-skip-permissions'];
-  if (resume) baseArgs.push('--resume', resume);
+  let baseArgs = Array.isArray(profile.args) ? [...profile.args] : providers.defaultArgs(provider.id);
+  if (resume) baseArgs = providers.appendResumeArgs(provider.id, baseArgs, resume);
 
   // 名稱：使用者指定 > profile name + 時間戳尾巴
   const name = sessionName || `${profile.name}-${Date.now().toString(36).slice(-4)}`;
@@ -146,6 +170,7 @@ app.post('/api/profiles/:id/launch', (req, res) => {
       cmd: profile.cmd || undefined,
       args: baseArgs,
       profileId: profile.id,
+      provider: provider.id,
     });
     // 紀錄 lastUsedAt / lastSessionId（resume 才有意義）
     profileStore.update(profile.id, {
@@ -201,12 +226,12 @@ app.get('/api/sessions', (req, res) => {
 });
 
 app.post('/api/sessions', (req, res) => {
-  const { name, cwd, cmd, args, cols, rows } = req.body || {};
+  const { name, cwd, cmd, args, cols, rows, provider } = req.body || {};
   if (!name || typeof name !== 'string') {
     return res.status(400).json({ error: 'name is required' });
   }
   try {
-    const session = registry.create({ name, cwd, cmd, args, cols, rows });
+    const session = registry.create({ name, cwd, cmd, args, cols, rows, provider });
     res.status(201).json(session.toJSON());
   } catch (err) {
     res.status(400).json({ error: err.message });

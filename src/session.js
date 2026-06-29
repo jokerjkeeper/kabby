@@ -4,18 +4,17 @@ const { EventEmitter } = require('events');
 const RingBuffer = require('./ring-buffer');
 const sensitive = require('./sensitive');
 const { createInputFilter } = require('./input-filter');
+const providers = require('./providers');
 
 const INPUT_MATCHER_TTL = 3000; // 敏感詞 matcher 快取（避免每個 keystroke 都讀檔）
 
-const IS_WINDOWS = process.platform === 'win32';
-// Windows 上 npm 全局 CLI 是 .cmd shim，沒 .exe。node-pty 能直接 spawn .cmd。
-const DEFAULT_CMD = IS_WINDOWS ? 'claude.cmd' : 'claude';
-
 class Session extends EventEmitter {
-  constructor({ name, cwd, cmd, args, cols = 220, rows = 50, profileId = null }) {
+  constructor({ name, cwd, cmd, args, cols = 220, rows = 50, profileId = null, provider = 'claude' }) {
     super();
+    const providerInfo = providers.getProvider(provider);
     this.id = randomUUID();
     this.name = name;
+    this.provider = providerInfo.id;
     this.cwd = cwd || process.cwd();
     this.createdAt = new Date().toISOString();
     this.cols = cols;
@@ -31,11 +30,11 @@ class Session extends EventEmitter {
     this._inputMatcher = null;
     this._inputMatcherAt = 0;
 
-    const spawnCmd = cmd || DEFAULT_CMD;
-    const spawnArgs = args || ['--dangerously-skip-permissions'];
+    const spawnCmd = cmd || providers.defaultCmd(this.provider);
+    const spawnArgs = Array.isArray(args) ? args : providers.defaultArgs(this.provider);
 
-    // 若 args 含 --resume <id>，記下這個 cc session id 供佔用偵測用
-    this.ccSessionId = extractResumeId(spawnArgs);
+    // 若 args 含 provider 的 resume 參數，記下這個歷史 session id 供佔用偵測用
+    this.resumeSessionId = providers.extractResumeSessionId(this.provider, spawnArgs);
 
     try {
       this.proc = pty.spawn(spawnCmd, spawnArgs, {
@@ -131,7 +130,9 @@ class Session extends EventEmitter {
       alive: this.alive,
       exitCode: this.exitCode,
       profileId: this.profileId,
-      ccSessionId: this.ccSessionId,
+      provider: this.provider,
+      resumeSessionId: this.resumeSessionId,
+      ccSessionId: this.provider === 'claude' ? this.resumeSessionId : null,
     };
   }
 
@@ -143,18 +144,4 @@ class Session extends EventEmitter {
   }
 }
 
-function extractResumeId(args) {
-  if (!Array.isArray(args)) return null;
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--resume' || args[i] === '-r') {
-      return args[i + 1] || null;
-    }
-    // 也支援 --resume=<id>
-    const m = /^--resume=(.+)$/.exec(args[i]);
-    if (m) return m[1];
-  }
-  return null;
-}
-
 module.exports = Session;
-

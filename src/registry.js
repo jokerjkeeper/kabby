@@ -1,4 +1,5 @@
 const Session = require('./session');
+const providers = require('./providers');
 
 class Registry {
   constructor() {
@@ -38,13 +39,19 @@ class Registry {
     return Array.from(this.sessions.values()).map((s) => s.toJSON());
   }
 
-  // 哪些 cc session id 正被運行中的 PTY 佔用
-  busyCcSessionIds() {
+  // 哪些 provider 歷史 session id 正被運行中的 PTY 佔用
+  busyResumeSessionIds(provider) {
+    const id = providers.normalizeProvider(provider);
     const ids = new Set();
     for (const s of this.sessions.values()) {
-      if (s.alive && s.ccSessionId) ids.add(s.ccSessionId);
+      if (s.alive && s.provider === id && s.resumeSessionId) ids.add(s.resumeSessionId);
     }
     return ids;
+  }
+
+  // 舊名保留：目前僅代表 Claude Code 的 resume 佔用集合
+  busyCcSessionIds() {
+    return this.busyResumeSessionIds('claude');
   }
 
   destroy(id) {

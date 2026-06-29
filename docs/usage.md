@@ -47,7 +47,7 @@ PowerShell 寫法：
 Invoke-RestMethod -Method Post `
   -Uri http://localhost:3700/api/sessions `
   -ContentType 'application/json' `
-  -Body '{"name":"unity","cwd":"D:/Projects/RS/my-app/unity"}'
+  -Body '{"name":"unity","provider":"claude","cwd":"D:/Projects/RS/my-app/unity"}'
 ```
 
 回應：
@@ -167,3 +167,10 @@ npm install --build-from-source
 - Phase 2：瀏覽器開 `http://localhost:3700` 直接用，不用 wscat
 - Phase 3：wepages 任務頁 Terminal 按鈕掛載
 - Phase 4：點子清單自動注入 task context
+
+
+## Codex provider
+
+You can now create a session or profile with `provider: "codex"`.
+This branch only adds initial Codex session launch and attach support.
+History, resume, and monitoring are still Claude-only for now.
