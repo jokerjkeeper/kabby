@@ -13,10 +13,10 @@
     codex: {
       cmdPlaceholder: '預設：codex.cmd（Win）/ codex（Unix）',
       cmdHint: '通常留空即可；只有要覆蓋成別的執行檔才填。',
-      argsPlaceholder: '預設：無參數',
-      argsHint: 'Codex 預設不帶參數；目前只提供 --full-auto 作為可選項。',
-      chips: ['--full-auto'],
-      defaultArgsText: '',
+      argsPlaceholder: '預設：--dangerously-bypass-approvals-and-sandbox',
+      argsHint: '0.142+ 已無 --full-auto。bypass = 全自動免確認（對齊 claude yolo）；resume 時此旗標會自動略過（resume 子命令不收）。',
+      chips: ['--dangerously-bypass-approvals-and-sandbox', '--search'],
+      defaultArgsText: '--dangerously-bypass-approvals-and-sandbox',
     },
   };
   let authToken = localStorage.getItem('kabby-auth-token') || '';
