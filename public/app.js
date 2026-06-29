@@ -37,8 +37,12 @@
   let paneSeq = 0, tabSeq = 0;
   const MAX_PANES_PER_TAB = 4;
   let viewerConfigured = false;
-  const expandedProfiles = new Set();      // 哪些 profile 卡片是展開的
+  const expandedProfiles = new Set();      // 側欄哪些 profile 卡片是展開的
+  const expandedModalProfiles = new Set(); // 「全部項目」modal 裡哪些卡片展開（與側欄獨立）
   const historyCache = new Map();          // profileId → history array
+  let allProfiles = [];                    // 最近一次抓到的完整項目清單（給 modal 用）
+  let projectsView = localStorage.getItem('kabby-projects-view') || 'grid';  // modal 版型：'grid' | 'list'
+  const RECENT_DAYS = 7;                    // 側欄只顯示 N 天內用過的項目，其餘收進「全部項目」modal
 
   // ──────────────────────────────────────────────────────────────────────
   // DOM refs
@@ -57,6 +61,10 @@
   const tabListEl = document.getElementById('tab-list');
   const tabEmptyEl = document.getElementById('tab-empty');
   const helpModal = document.getElementById('help-modal');
+  const projectsModal = document.getElementById('projects-modal');
+  const apSearchEl = document.getElementById('ap-search');
+  const apGridBtn = document.getElementById('ap-grid');
+  const apListBtn = document.getElementById('ap-list');
 
   // ──────────────────────────────────────────────────────────────────────
   // Helpers
@@ -101,59 +109,90 @@
     }
   }
 
+  // 該項目是否「近期」：busy（運行中）永遠算近期，否則看 lastUsedAt 是否在 RECENT_DAYS 內
+  function isRecentProfile(p) {
+    if (p.lastSessionBusy) return true;
+    if (!p.lastUsedAt) return false;
+    return (Date.now() - new Date(p.lastUsedAt).getTime()) < RECENT_DAYS * 86_400_000;
+  }
+
+  // 建一張項目卡片。側欄與 modal 共用；用 expandedSet / onToggle 區分各自的展開狀態。
+  function createProfileCard(p, expandedSet, onToggle) {
+    const card = document.createElement('div');
+    card.className = 'profile-card' + (expandedSet.has(p.id) ? ' expanded' : '');
+    card.dataset.id = p.id;
+
+    const head = document.createElement('div');
+    head.className = 'profile-head';
+    head.innerHTML = `
+      <div class="profile-name">
+        <span>${escapeHtml(p.name)}</span>
+        ${p.lastSessionBusy ? '<span class="badge warn">last 掛載中</span>' : ''}
+      </div>
+      <div class="profile-meta">${escapeHtml(shorten(p.cwd, 38))}</div>
+      <div class="profile-meta">最近：${escapeHtml(timeAgo(p.lastUsedAt))}</div>
+    `;
+    head.addEventListener('click', () => onToggle(p.id));
+    card.appendChild(head);
+
+    const body = document.createElement('div');
+    body.className = 'profile-body';
+    body.innerHTML = `
+      <div class="profile-actions">
+        <button class="btn primary tiny" data-action="new-chat">新對話</button>
+        <button class="btn tiny" data-action="resume-last" ${p.lastSessionId && !p.lastSessionBusy ? '' : 'disabled'}>接續上次</button>
+        <button class="btn tiny" data-action="edit">編輯</button>
+        <button class="btn tiny" data-action="open-folder">歷史目錄</button>
+        <button class="btn danger tiny" data-action="delete">刪除</button>
+      </div>
+      <div class="history-list" data-history-list>
+        <div class="empty">點開項目自動讀取歷史…</div>
+      </div>
+    `;
+    card.appendChild(body);
+
+    body.querySelector('[data-action="new-chat"]').addEventListener('click', (e) => { e.stopPropagation(); launchProfile(p.id); });
+    body.querySelector('[data-action="resume-last"]').addEventListener('click', (e) => { e.stopPropagation(); if (p.lastSessionId) launchProfile(p.id, p.lastSessionId); });
+    body.querySelector('[data-action="edit"]').addEventListener('click', (e) => { e.stopPropagation(); openProfileModal(p); });
+    body.querySelector('[data-action="open-folder"]').addEventListener('click', (e) => { e.stopPropagation(); openHistoryFolder(p.id); });
+    body.querySelector('[data-action="delete"]').addEventListener('click', (e) => { e.stopPropagation(); deleteProfile(p.id, p.name); });
+
+    if (expandedSet.has(p.id)) {
+      renderHistoryList(p.id, body.querySelector('[data-history-list]'));
+    }
+    return card;
+  }
+
   function renderProfiles(profiles) {
+    allProfiles = profiles;
     if (!profiles.length) {
       profileListEl.innerHTML = '<div class="empty-hint">尚無項目。點右上「+ 項目」建立。</div>';
       return;
     }
     profileListEl.innerHTML = '';
-    for (const p of profiles) {
-      const card = document.createElement('div');
-      card.className = 'profile-card' + (expandedProfiles.has(p.id) ? ' expanded' : '');
-      card.dataset.id = p.id;
-
-      const head = document.createElement('div');
-      head.className = 'profile-head';
-      head.innerHTML = `
-        <div class="profile-name">
-          <span>${escapeHtml(p.name)}</span>
-          ${p.lastSessionBusy ? '<span class="badge warn">last 掛載中</span>' : ''}
-        </div>
-        <div class="profile-meta">${escapeHtml(shorten(p.cwd, 38))}</div>
-        <div class="profile-meta">最近：${escapeHtml(timeAgo(p.lastUsedAt))}</div>
-      `;
-      head.addEventListener('click', () => toggleProfile(p.id));
-      card.appendChild(head);
-
-      const body = document.createElement('div');
-      body.className = 'profile-body';
-      body.innerHTML = `
-        <div class="profile-actions">
-          <button class="btn primary tiny" data-action="new-chat">新對話</button>
-          <button class="btn tiny" data-action="resume-last" ${p.lastSessionId && !p.lastSessionBusy ? '' : 'disabled'}>接續上次</button>
-          <button class="btn tiny" data-action="edit">編輯</button>
-          <button class="btn tiny" data-action="open-folder">歷史目錄</button>
-          <button class="btn danger tiny" data-action="delete">刪除</button>
-        </div>
-        <div class="history-list" data-history-list>
-          <div class="empty">點開項目自動讀取歷史…</div>
-        </div>
-      `;
-      card.appendChild(body);
-
-      body.querySelector('[data-action="new-chat"]').addEventListener('click', (e) => { e.stopPropagation(); launchProfile(p.id); });
-      body.querySelector('[data-action="resume-last"]').addEventListener('click', (e) => { e.stopPropagation(); if (p.lastSessionId) launchProfile(p.id, p.lastSessionId); });
-      body.querySelector('[data-action="edit"]').addEventListener('click', (e) => { e.stopPropagation(); openProfileModal(p); });
-      body.querySelector('[data-action="open-folder"]').addEventListener('click', (e) => { e.stopPropagation(); openHistoryFolder(p.id); });
-      body.querySelector('[data-action="delete"]').addEventListener('click', (e) => { e.stopPropagation(); deleteProfile(p.id, p.name); });
-
-      profileListEl.appendChild(card);
-
-      // 若已展開，載入歷史列表
-      if (expandedProfiles.has(p.id)) {
-        renderHistoryList(p.id, body.querySelector('[data-history-list]'));
-      }
+    const recent = profiles.filter(isRecentProfile);
+    if (!recent.length) {
+      const hint = document.createElement('div');
+      hint.className = 'empty-hint';
+      hint.textContent = `近 ${RECENT_DAYS} 天沒有活動的項目。點下方「全部項目」找。`;
+      profileListEl.appendChild(hint);
     }
+    for (const p of recent) {
+      profileListEl.appendChild(createProfileCard(p, expandedProfiles, toggleProfile));
+    }
+
+    // 「全部項目」入口：開 modal（grid/list + 搜尋）
+    const more = document.createElement('button');
+    more.className = 'btn tiny';
+    more.id = 'open-all-projects';
+    more.style.cssText = 'display:block; width:calc(100% - 12px); margin:6px; text-align:center;';
+    more.textContent = `📁 全部項目 (${profiles.length})`;
+    more.title = '開啟所有項目（可搜尋、grid/list 切換、展開歷史接續舊 session）';
+    more.addEventListener('click', openProjectsModal);
+    profileListEl.appendChild(more);
+
+    // modal 開著時，資料刷新（busy/最近時間變動）也同步重繪
+    if (projectsModal && projectsModal.classList.contains('visible')) renderProjectsModal();
   }
 
   async function toggleProfile(id) {
@@ -164,6 +203,54 @@
       await fetchHistory(id);     // 預先抓
     }
     await refreshProfiles();
+  }
+
+  // ── 「全部項目」modal ──────────────────────────────────────────────
+  async function toggleModalProfile(id) {
+    if (expandedModalProfiles.has(id)) {
+      expandedModalProfiles.delete(id);
+    } else {
+      expandedModalProfiles.add(id);
+      await fetchHistory(id);
+    }
+    renderProjectsModal();
+  }
+
+  function renderProjectsModal() {
+    const body = document.getElementById('ap-body');
+    if (!body) return;
+    const q = (apSearchEl.value || '').trim().toLowerCase();
+    let list = allProfiles;
+    if (q) {
+      list = list.filter((p) =>
+        (p.name || '').toLowerCase().includes(q) || (p.cwd || '').toLowerCase().includes(q));
+    }
+    document.getElementById('ap-count').textContent =
+      q ? `(${list.length} / ${allProfiles.length})` : `(${allProfiles.length})`;
+    apGridBtn.classList.toggle('active', projectsView === 'grid');
+    apListBtn.classList.toggle('active', projectsView === 'list');
+    body.className = 'projects-body ' + projectsView;
+    body.innerHTML = '';
+    if (!list.length) {
+      body.innerHTML = '<div class="ap-empty">沒有符合的項目。</div>';
+      return;
+    }
+    for (const p of list) {
+      body.appendChild(createProfileCard(p, expandedModalProfiles, toggleModalProfile));
+    }
+  }
+
+  function openProjectsModal() {
+    projectsModal.classList.add('visible');
+    renderProjectsModal();
+    apSearchEl.focus();
+    apSearchEl.select();
+  }
+  function closeProjectsModal() { projectsModal.classList.remove('visible'); }
+  function setProjectsView(v) {
+    projectsView = v;
+    try { localStorage.setItem('kabby-projects-view', v); } catch {}
+    renderProjectsModal();
   }
 
   async function renderHistoryList(profileId, container) {
@@ -177,8 +264,13 @@
     for (const h of history) {
       const item = document.createElement('div');
       item.className = 'history-item' + (h.busy ? ' busy' : '');
+      // 有 /rename 自訂名 → 名字當主標、首句摘要降級為副標；沒有就照舊只顯示摘要
+      const titleRow = h.title
+        ? `<div class="summary"><span class="title">${escapeHtml(h.title)}</span> <span class="badge named" title="cc /rename 設定的名稱">named</span></div>
+           <div class="meta" style="color:#666">${escapeHtml(h.summary || '(無摘要)')}</div>`
+        : `<div class="summary">${escapeHtml(h.summary || '(無摘要)')}</div>`;
       item.innerHTML = `
-        <div class="summary">${escapeHtml(h.summary || '(無摘要)')}</div>
+        ${titleRow}
         <div class="meta">
           <span>${escapeHtml(timeAgo(new Date(h.mtime).toISOString()))}</span>
           <span>·</span>
@@ -207,6 +299,7 @@
       // 新 PTY 上線 → busy set 變了，清 history cache 讓展開的歷史列表反映
       historyCache.clear();
       await Promise.all([refreshProfiles(), refreshSessions()]);
+      if (projectsModal.classList.contains('visible')) closeProjectsModal();
       openSession(json.id, json);
     } catch (err) {
       alert('啟動失敗：' + err.message);
@@ -938,6 +1031,7 @@
   // ──────────────────────────────────────────────────────────────────────
   const sm = {
     modal: document.getElementById('session-modal'),
+    provider: document.getElementById('sm-provider'),
     name: document.getElementById('sm-name'),
     cwd: document.getElementById('sm-cwd'),
     cmd: document.getElementById('sm-cmd'),
@@ -953,7 +1047,7 @@
     setTimeout(() => sm.name.focus(), 50);
   }
   function smClose() { sm.modal.classList.remove('visible'); }
-  function smReset() { sm.name.value = sm.cwd.value = sm.cmd.value = sm.args.value = ''; smSyncChips(); }
+  function smReset() { sm.provider.value = 'claude'; sm.name.value = sm.cwd.value = sm.cmd.value = sm.args.value = ''; smSyncChips(); }
   function smTokens() { return sm.args.value.trim() ? sm.args.value.trim().split(/\s+/) : []; }
   function smSyncChips() {
     const set = new Set(smTokens());
@@ -970,7 +1064,7 @@
   async function smSubmit() {
     const name = sm.name.value.trim();
     if (!name) { sm.err.textContent = '請輸入名稱'; return; }
-    const body = { name };
+    const body = { name, provider: sm.provider.value || 'claude' };
     if (sm.cwd.value.trim()) body.cwd = sm.cwd.value.trim();
     if (sm.cmd.value.trim()) body.cmd = sm.cmd.value.trim();
     const args = parseArgsRaw(sm.args.value);
@@ -1001,6 +1095,7 @@
   const pm = {
     modal: document.getElementById('profile-modal'),
     title: document.getElementById('pm-title'),
+    provider: document.getElementById('pm-provider'),
     name: document.getElementById('pm-name'),
     cwd: document.getElementById('pm-cwd'),
     cmd: document.getElementById('pm-cmd'),
@@ -1016,6 +1111,7 @@
     if (profile) {
       pm.editingId = profile.id;
       pm.title.textContent = '編輯項目：' + profile.name;
+      pm.provider.value = profile.provider || 'claude';
       pm.name.value = profile.name;
       pm.cwd.value = profile.cwd;
       pm.cmd.value = profile.cmd || '';
@@ -1024,6 +1120,7 @@
     } else {
       pm.editingId = null;
       pm.title.textContent = '新建項目';
+      pm.provider.value = 'claude';
       pm.name.value = pm.cwd.value = pm.cmd.value = pm.args.value = '';
       pm.del.style.display = 'none';
     }
@@ -1050,7 +1147,7 @@
     const cwd = pm.cwd.value.trim();
     if (!name) { pm.err.textContent = '請輸入項目名稱'; return; }
     if (!cwd) { pm.err.textContent = '請輸入工作目錄'; return; }
-    const body = { name, cwd };
+    const body = { name, cwd, provider: pm.provider.value || 'claude' };
     if (pm.cmd.value.trim()) body.cmd = pm.cmd.value.trim();
     const args = parseArgsRaw(pm.args.value);
     if (args !== undefined) body.args = args;
@@ -1131,13 +1228,14 @@
   // Modal 鍵盤 (ESC / Enter) — modal 開啟時優先處理
   document.addEventListener('keydown', (e) => {
     const monModalEl = document.getElementById('monitor-modal');
-    const inModal = sm.modal.classList.contains('visible') || pm.modal.classList.contains('visible') || helpModal.classList.contains('visible') || monModalEl.classList.contains('visible');
+    const inModal = sm.modal.classList.contains('visible') || pm.modal.classList.contains('visible') || helpModal.classList.contains('visible') || monModalEl.classList.contains('visible') || projectsModal.classList.contains('visible');
     if (!inModal) return;
     if (e.key === 'Escape') {
       if (sm.modal.classList.contains('visible')) smClose();
       if (pm.modal.classList.contains('visible')) pmClose();
       if (helpModal.classList.contains('visible')) closeHelp();
       if (monModalEl.classList.contains('visible')) monModalEl.classList.remove('visible');
+      if (projectsModal.classList.contains('visible')) closeProjectsModal();
     } else if (e.key === 'Enter') {
       if (sm.modal.classList.contains('visible')) smSubmit();
       else if (pm.modal.classList.contains('visible')) pmSubmit();
@@ -1617,6 +1715,13 @@
   }
   document.getElementById('monitor-btn').addEventListener('click', openMonitor);
   document.getElementById('mon-close').addEventListener('click', closeMonitor);
+
+  // 「全部項目」modal 控制
+  document.getElementById('ap-close').addEventListener('click', closeProjectsModal);
+  projectsModal.addEventListener('click', (e) => { if (e.target === projectsModal) closeProjectsModal(); });
+  apGridBtn.addEventListener('click', () => setProjectsView('grid'));
+  apListBtn.addEventListener('click', () => setProjectsView('list'));
+  apSearchEl.addEventListener('input', renderProjectsModal);
   document.getElementById('mon-refresh').addEventListener('click', loadMonitor);
   document.getElementById('mon-rebuild').addEventListener('click', async () => {
     if (!confirm('重審歷史：砍索引從頭全掃，重新計算所有既有對話的 token/成本（套用 requestId 去重修正，數字會校正到正確值）並套用目前敏感詞庫。資料量大時較久，確定？')) return;
