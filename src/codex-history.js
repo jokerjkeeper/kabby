@@ -148,4 +148,9 @@ module.exports = {
   SESSION_INDEX_FILE,
   projectDir,
   listHistory,
+  // 供 codex-collector 複用
+  listSessionFiles,
+  readSessionMeta,
+  isInjectedContext,
+  extractUserMessage,
 };

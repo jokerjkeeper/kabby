@@ -10,8 +10,15 @@ const profileStore = require('./profile-store');
 const ccHistory = require('./cc-history');
 const history = require('./history');
 const ccCollector = require('./cc-collector');
-const usageWatcher = require('./usage-watcher');
+const codexCollector = require('./codex-collector');
+const codexHistory = require('./codex-history');
+const { createWatcher } = require('./usage-watcher');
 const providers = require('./providers');
+
+// 監控 provider 路由：?provider=codex → codex 採集器，其餘（含未帶）→ claude。
+function collectorFor(provider) {
+  return providers.normalizeProvider(provider) === 'codex' ? codexCollector : ccCollector;
+}
 
 // 載入專案根目錄的 .env（Node 20.12+ 內建 loadEnvFile，零依賴）；檔案不存在或舊版 node 則略過
 if (typeof process.loadEnvFile === 'function') {
@@ -280,16 +287,17 @@ app.post('/api/sessions/:id/input', (req, res) => {
 // GET /api/usage?rebuild=1       → 砍索引從頭全掃（套用新敏感詞庫到既有歷史，較重）
 app.get('/api/usage', (req, res) => {
   try {
+    const collector = collectorFor(req.query.provider);
     const cwd = req.query.cwd ? ccHistory.normalizeCwd(req.query.cwd) : null;
     const filter = cwd ? { cwd } : undefined;
     let view;
     if (req.query.rebuild === '1') {
-      view = ccCollector.rebuildAll();
-      if (cwd) view = ccCollector.view(filter);
+      view = collector.rebuildAll();
+      if (cwd) view = collector.view(filter);
     } else if (req.query.refresh === '1') {
-      view = cwd ? ccCollector.scanProject(cwd) : ccCollector.scanAll();
+      view = cwd ? collector.scanProject(cwd) : collector.scanAll();
     } else {
-      view = ccCollector.view(filter);
+      view = collector.view(filter);
     }
     res.json(view);
   } catch (err) {
@@ -298,11 +306,12 @@ app.get('/api/usage', (req, res) => {
 });
 
 // GET /api/usage/sensitive          → 所有 session 的敏感詞命中（攤平、時間新→舊）
-// GET /api/usage/sensitive?cwd=...   → 只回該 project
+// GET /api/usage/sensitive?cwd=...   → 只回該 project；?provider=codex → codex
 app.get('/api/usage/sensitive', (req, res) => {
   try {
+    const collector = collectorFor(req.query.provider);
     const cwd = req.query.cwd ? ccHistory.normalizeCwd(req.query.cwd) : null;
-    res.json(ccCollector.sensitiveHits(cwd ? { cwd } : undefined));
+    res.json(collector.sensitiveHits(cwd ? { cwd } : undefined));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -311,7 +320,7 @@ app.get('/api/usage/sensitive', (req, res) => {
 // GET /api/usage/:sessionId/conversation → 按需從原檔讀完整對話（不存索引）
 app.get('/api/usage/:sessionId/conversation', async (req, res) => {
   try {
-    const convo = await ccCollector.readConversation(req.params.sessionId);
+    const convo = await collectorFor(req.query.provider).readConversation(req.params.sessionId);
     if (!convo) return res.status(404).json({ error: 'session jsonl not found' });
     res.json(convo);
   } catch (err) {
@@ -322,7 +331,7 @@ app.get('/api/usage/:sessionId/conversation', async (req, res) => {
 // GET /api/usage/:sessionId/analysis → 單 session 成本歸因（誰貴/為何貴/診斷）
 app.get('/api/usage/:sessionId/analysis', async (req, res) => {
   try {
-    const a = await ccCollector.analyzeSession(req.params.sessionId);
+    const a = await collectorFor(req.query.provider).analyzeSession(req.params.sessionId);
     if (!a) return res.status(404).json({ error: 'session jsonl not found' });
     res.json(a);
   } catch (err) {
@@ -336,16 +345,22 @@ app.use(express.static(PUBLIC_DIR));
 const httpServer = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
-// 監控頁即時推送：watcher 每次掃描後廣播聚合 view 給這些 client
+// 監控頁即時推送：watcher 每次掃描後廣播聚合 view 給這些 client。
+// 帶 provider 讓前端依目前選的 provider 過濾（claude view 無 provider 欄 → 補 'claude'）。
 const usageClients = new Set();
 function broadcastUsage(view) {
   if (!usageClients.size) return;
-  const msg = JSON.stringify({ type: 'usage', ...view });
+  const msg = JSON.stringify({ type: 'usage', provider: view.provider || 'claude', ...view });
   for (const ws of usageClients) {
     if (ws.readyState === ws.OPEN) ws.send(msg);
   }
 }
-usageWatcher.setOnScan(broadcastUsage);
+
+// 兩個 provider 各一個背景 watcher（claude → ~/.claude/projects、codex → ~/.codex/sessions）
+const ccWatcher = createWatcher({ watchDir: ccHistory.PROJECTS_DIR, collector: ccCollector, label: 'claude' });
+const codexWatcher = createWatcher({ watchDir: codexHistory.SESSIONS_DIR, collector: codexCollector, label: 'codex' });
+ccWatcher.setOnScan(broadcastUsage);
+codexWatcher.setOnScan(broadcastUsage);
 
 httpServer.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -415,15 +430,17 @@ function handleConnection(ws, session) {
 httpServer.listen(PORT, HOST, () => {
   console.log(`kabby daemon listening on http://${HOST}:${PORT}`);
   console.log(AUTH_TOKEN ? '[auth] AUTH_TOKEN enabled — /api + WS 需要 token' : '[auth] AUTH_TOKEN 未設 — 不鎖（僅適合本機）');
-  // 背景採集：監看 cc JSONL，檔案一變就增量入庫（B 方案常駐採集）
-  usageWatcher.start();
+  // 背景採集：監看 cc / codex JSONL，檔案一變就增量入庫（B 方案常駐採集）
+  ccWatcher.start();
+  codexWatcher.start();
 });
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 function shutdown() {
   console.log('\n[kabby] shutting down...');
-  usageWatcher.stop();
+  ccWatcher.stop();
+  codexWatcher.stop();
   for (const s of registry.list()) {
     const session = registry.get(s.id);
     if (session) session.kill();

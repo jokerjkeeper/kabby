@@ -220,10 +220,10 @@ function run() {
   // 家族 fallback：未知 opus 變體照 opus 算
   const c3 = pricing.cost({ 'claude-opus-4-9-future': { input: 1e6 } });
   assert.ok(Math.abs(c3.usd - 5) < 1e-9, '未知 opus 變體 fallback 到 opus 費率');
-  // 完全不認得 → 列入 unknownModels、不算成本
-  const c4 = pricing.cost({ 'gpt-9': { input: 1e6 } });
+  // 完全不認得 → 列入 unknownModels、不算成本（gpt/codex 現已是已知家族，改用真正未知的 model）
+  const c4 = pricing.cost({ 'mistral-large-2': { input: 1e6 } });
   assert.strictEqual(c4.usd, 0);
-  assert.deepStrictEqual(c4.unknownModels, ['gpt-9']);
+  assert.deepStrictEqual(c4.unknownModels, ['mistral-large-2']);
   // buildView 帶出 costUsd
   const idxP = { version: 1, updatedAt: 'X', sessions: {
     a: { sessionId: 'a', projectDir: 'D--x', cwd: 'D:\\x', summary: '', firstTs: '1', lastTs: '2', turns: 1, userMsgs: 0, models: { 'claude-opus-4-8': 1 }, tokens: { input: 0, output: 0, cacheCreate: 0, cacheRead: 0 }, modelTokens: { 'claude-opus-4-8': { output: 1e6 } }, size: 0 },

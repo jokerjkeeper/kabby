@@ -522,6 +522,21 @@
     .monitor-head h2 { margin: 0; }
     .monitor-head h2 small { color: #888; font-weight: 400; font-size: 11px; margin-left: 8px; }
     .monitor-actions { display: flex; gap: 6px; }
+    /* Provider 切換器 */
+    .mon-provider { display: flex; gap: 0; border: 1px solid #3a3a3a; border-radius: 5px; overflow: hidden; margin-left: auto; }
+    .mon-prov { background: #2a2a2a; color: #999; border: 0; padding: 4px 12px; font-size: 12px; cursor: pointer; }
+    .mon-prov:hover { background: #333; color: #ccc; }
+    .mon-prov.active { background: #0e639c; color: #fff; font-weight: 600; }
+    /* Rate-limit 面板（codex 專屬） */
+    .mon-ratelimit { margin-top: 8px; padding: 8px 10px; background: #232323; border: 1px solid #333; border-radius: 5px; font-size: 12px; }
+    .mon-ratelimit .rl-head { color: #bbb; margin-bottom: 6px; }
+    .mon-ratelimit .rl-head b { color: #4ec9b0; }
+    .mon-ratelimit .rl-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+    .mon-ratelimit .rl-label { width: 110px; color: #999; flex: 0 0 auto; }
+    .mon-ratelimit .bar-track { flex: 1; height: 10px; background: #1a1a1a; border-radius: 5px; overflow: hidden; }
+    .mon-ratelimit .bar-fill { display: block; height: 100%; }
+    .mon-ratelimit .rl-val { width: 42px; text-align: right; font-variant-numeric: tabular-nums; color: #ddd; flex: 0 0 auto; }
+    .mon-ratelimit .rl-reset { color: #777; font-size: 11px; flex: 0 0 auto; }
     .monitor-totals {
       display: flex; flex-wrap: wrap; gap: 18px; margin: 12px 0; padding: 10px 14px;
       background: #252526; border: 1px solid #333; border-radius: 4px;
@@ -847,6 +862,10 @@
     <div class="modal monitor">
       <div class="monitor-head">
         <h2>監控 <small id="mon-updated"></small> <span id="mon-live" class="mon-live" title="背景 watcher 即時推送中">● live</span></h2>
+        <div id="mon-provider" class="mon-provider" title="切換要看的 provider">
+          <button class="mon-prov active" data-provider="claude">Claude</button>
+          <button class="mon-prov" data-provider="codex">Codex</button>
+        </div>
         <div class="monitor-actions">
           <button class="btn" id="mon-refresh" title="重讀索引（背景 watcher 已持續採集）">重新整理</button>
           <button class="btn" id="mon-rebuild" title="砍索引從頭全掃，套用目前敏感詞庫/定價到既有歷史（資料量大時較久）">重審歷史</button>
@@ -854,6 +873,7 @@
         </div>
       </div>
       <div class="monitor-totals" id="mon-totals"></div>
+      <div class="mon-ratelimit" id="mon-ratelimit" style="display:none"></div>
       <div class="monitor-tabs">
         <button class="mon-tab active" data-view="usage">Token 用量</button>
         <button class="mon-tab" data-view="live">Live</button>

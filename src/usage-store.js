@@ -31,7 +31,8 @@ const path = require('path');
 const os = require('os');
 
 const STORE_DIR = path.join(os.homedir(), '.kabby');
-const STORE_FILE = path.join(STORE_DIR, 'usage-index.json');
+// 預設 claude 索引檔；其他 provider（codex）傳 fileName 用獨立檔，互不污染。
+const DEFAULT_FILE = 'usage-index.json';
 
 const CURRENT_VERSION = 1;
 
@@ -39,15 +40,20 @@ function ensureDir() {
   if (!fs.existsSync(STORE_DIR)) fs.mkdirSync(STORE_DIR, { recursive: true });
 }
 
+function storePath(fileName) {
+  return path.join(STORE_DIR, fileName || DEFAULT_FILE);
+}
+
 function emptyIndex() {
   return { version: CURRENT_VERSION, updatedAt: null, sessions: {} };
 }
 
-function load() {
+function load(fileName) {
   ensureDir();
-  if (!fs.existsSync(STORE_FILE)) return emptyIndex();
+  const file = storePath(fileName);
+  if (!fs.existsSync(file)) return emptyIndex();
   try {
-    const raw = fs.readFileSync(STORE_FILE, 'utf8');
+    const raw = fs.readFileSync(file, 'utf8');
     const data = JSON.parse(raw);
     if (!data || typeof data.sessions !== 'object' || data.sessions === null) {
       return emptyIndex();
@@ -55,20 +61,23 @@ function load() {
     if (typeof data.version !== 'number') data.version = CURRENT_VERSION;
     return data;
   } catch (err) {
-    console.error('[usage-store] corrupt usage-index.json:', err.message);
+    console.error(`[usage-store] corrupt ${fileName || DEFAULT_FILE}:`, err.message);
     return emptyIndex();
   }
 }
 
-function save(data) {
+function save(data, fileName) {
   ensureDir();
-  const tmp = STORE_FILE + '.tmp';
+  const file = storePath(fileName);
+  const tmp = file + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-  fs.renameSync(tmp, STORE_FILE);
+  fs.renameSync(tmp, file);
 }
 
 module.exports = {
-  STORE_FILE,
+  STORE_FILE: storePath(DEFAULT_FILE),
+  DEFAULT_FILE,
+  storePath,
   CURRENT_VERSION,
   emptyIndex,
   load,

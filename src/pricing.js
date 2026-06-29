@@ -25,6 +25,8 @@ function resolveFile() {
 }
 
 // 內建預設（USD / 1M tokens）
+// codex/gpt 為 OpenAI 估算（cached input 由 cacheRead=input×0.1 推導 ≈ 官方 10%）；
+// 精確值請以 ~/.kabby/model-prices.json 覆寫（codex 訂閱吃到飽，數字僅供 API 等值對比）。
 const DEFAULTS = {
   'claude-fable-5': { input: 10, output: 50 },
   'claude-opus-4-8': { input: 5, output: 25 },
@@ -34,6 +36,11 @@ const DEFAULTS = {
   'claude-sonnet-4-6': { input: 3, output: 15 },
   'claude-sonnet-4-5': { input: 3, output: 15 },
   'claude-haiku-4-5': { input: 1, output: 5 },
+  // OpenAI / Codex（gpt-5 家族，估算）
+  'gpt-5.4': { input: 1.25, output: 10 },
+  'gpt-5.1': { input: 1.25, output: 10 },
+  'gpt-5': { input: 1.25, output: 10 },
+  'gpt-5-codex': { input: 1.25, output: 10 },
 };
 
 // 未知 model id 時，用名稱含的家族字樣退而求其次
@@ -42,6 +49,8 @@ const FAMILY = [
   ['opus', { input: 5, output: 25 }],
   ['sonnet', { input: 3, output: 15 }],
   ['haiku', { input: 1, output: 5 }],
+  ['gpt', { input: 1.25, output: 10 }],
+  ['codex', { input: 1.25, output: 10 }],
 ];
 
 function load() {

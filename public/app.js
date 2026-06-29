@@ -816,6 +816,7 @@
   let leafLiveExpanded = false;
   let leafLiveTimer = null;
   let leafLiveTargetSid = null;
+  let leafLiveProvider = 'claude';
   let leafLiveEl = null;
 
   function leafLiveEnsureEl() {
@@ -853,6 +854,7 @@
     if (el.parentNode !== leaf.el) leaf.el.appendChild(el);
     if (sid !== leafLiveTargetSid) {
       leafLiveTargetSid = sid;
+      leafLiveProvider = (leaf.info && leaf.info.provider) || 'claude'; // 依 session 的 provider 路由 analysis
       el.querySelector('.ll-body').innerHTML = '<div style="padding:6px;color:#888">載入…</div>';
       leafLiveRefresh();
     }
@@ -863,7 +865,7 @@
     const sid = leafLiveTargetSid;
     if (!sid || !leafLiveEl) return;
     let a;
-    try { a = await apiFetch('/api/usage/' + encodeURIComponent(sid) + '/analysis').then((r) => r.json()); }
+    try { a = await apiFetch('/api/usage/' + encodeURIComponent(sid) + '/analysis?provider=' + (leafLiveProvider || 'claude')).then((r) => r.json()); }
     catch { return; }
     if (sid !== leafLiveTargetSid) return; // 焦點已換,丟棄
     leafLiveRender(a);
@@ -1420,6 +1422,9 @@
   let monConvoOpen = false;    // 有對話展開時，即時更新不重繪表格（避免收合）
   let monConvoLiveTimer = null; // 展開列右側 live feed 的輪詢 timer
   let monTabLiveTimer = null;   // 頂部 Live 分頁的輪詢 timer
+  let monProvider = 'claude';   // 監控頁目前看的 provider（頂部切換器）
+  // 監控 API 一律帶 ?provider=，路由到對應採集器（claude / codex 各自獨立索引）
+  function monUrl(path) { return path + (path.includes('?') ? '&' : '?') + 'provider=' + monProvider; }
   const SPIKE_CW = 15000;       // cacheCreate 超過此值 → 標紅（spike）。之後可做成設定項。
   const LIVE_ACTIVE_MS = 3 * 60 * 1000; // 最後一輪在 3 分鐘內 → 視為「進行中」,啟動輪詢
 
@@ -1436,13 +1441,14 @@
     monTotals.innerHTML = '<span style="color:#888">載入中…</span>';
     try {
       const [usage, sens] = await Promise.all([
-        apiFetch('/api/usage').then((r) => r.json()),
-        apiFetch('/api/usage/sensitive').then((r) => r.json()),
+        apiFetch(monUrl('/api/usage')).then((r) => r.json()),
+        apiFetch(monUrl('/api/usage/sensitive')).then((r) => r.json()),
       ]);
       monRenderTotals(usage.totals, usage.updatedAt);
       monRenderUsage(usage.sessions || []);
       monRenderCharts(usage.byModel || [], usage.byDay || []);
       monRenderSensitive(sens.hits || []);
+      monRenderRateLimits(usage.rateLimits);
     } catch (err) {
       if (err.message === 'unauthorized') return; // apiFetch 已彈登入
       monTotals.innerHTML = '<span style="color:#f48771">載入失敗：' + monEsc(err.message) + '</span>';
@@ -1463,6 +1469,8 @@
       let view;
       try { view = JSON.parse(ev.data); } catch { return; }
       if (!view || view.type !== 'usage') return;
+      // 兩個 provider 的 watcher 都會推；只套用目前選的 provider
+      if ((view.provider || 'claude') !== monProvider) return;
       monApplyView(view);
       monLiveEl.classList.remove('pulse'); void monLiveEl.offsetWidth; monLiveEl.classList.add('pulse');
     };
@@ -1476,13 +1484,34 @@
   function monApplyView(view) {
     monRenderTotals(view.totals, view.updatedAt);
     monRenderCharts(view.byModel || [], view.byDay || []);
+    monRenderRateLimits(view.rateLimits);
     // 表格：有對話展開時不重繪（避免把使用者正在看的內容收掉）
     if (!monConvoOpen) monRenderUsage(view.sessions || []);
     // 敏感詞分頁開著才順手刷新命中清單
     if (monSensEl.classList.contains('active')) {
-      apiFetch('/api/usage/sensitive').then((r) => r.json())
+      apiFetch(monUrl('/api/usage/sensitive')).then((r) => r.json())
         .then((s) => monRenderSensitive(s.hits || [])).catch(() => {});
     }
+  }
+
+  // Rate-limit 面板（codex 專屬）：rateLimits 來自 codex rollout 的帳號額度資訊。
+  function monRenderRateLimits(rl) {
+    const el = document.getElementById('mon-ratelimit');
+    if (!el) return;
+    if (monProvider !== 'codex' || !rl) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = '';
+    const bar = (label, w) => {
+      if (!w) return '';
+      const pct = Math.min(100, Math.round(w.used_percent || 0));
+      const reset = w.resets_at ? new Date(w.resets_at * 1000).toLocaleString('zh-TW', { hour12: false }) : '-';
+      const mins = w.window_minutes ? (w.window_minutes >= 1440 ? (w.window_minutes / 1440) + '天' : w.window_minutes >= 60 ? (w.window_minutes / 60) + '時' : w.window_minutes + '分') : '';
+      const hot = pct >= 90 ? '#e5534b' : pct >= 60 ? '#d7ba7d' : '#6cc04a';
+      return `<div class="rl-row"><span class="rl-label">${monEsc(label)}${mins ? ' (' + mins + ')' : ''}</span>`
+        + `<span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, pct)}%;background:${hot}"></span></span>`
+        + `<span class="rl-val">${pct}%</span><span class="rl-reset">重置 ${monEsc(reset)}</span></div>`;
+    };
+    el.innerHTML = `<div class="rl-head">Codex 額度 · plan <b>${monEsc(rl.plan_type || '?')}</b></div>`
+      + bar('主要視窗', rl.primary) + bar('次要視窗', rl.secondary);
   }
 
   function monBarRow(label, value, max, valStr, color) {
@@ -1576,8 +1605,8 @@
     try {
       // 並行抓「成本歸因」與「完整對話」
       const [analysis, c] = await Promise.all([
-        apiFetch('/api/usage/' + encodeURIComponent(sid) + '/analysis').then((r) => r.json()).catch(() => null),
-        apiFetch('/api/usage/' + encodeURIComponent(sid) + '/conversation').then((r) => r.json()),
+        apiFetch(monUrl('/api/usage/' + encodeURIComponent(sid) + '/analysis')).then((r) => r.json()).catch(() => null),
+        apiFetch(monUrl('/api/usage/' + encodeURIComponent(sid) + '/conversation')).then((r) => r.json()),
       ]);
       const turns = c.turns || [];
       const convoHtml = turns.length
@@ -1612,7 +1641,7 @@
     monConvoLiveTimer = setInterval(async () => {
       if (!convoRow.isConnected || convoRow.style.display === 'none') { monStopConvoLive(); return; }
       try {
-        const a = await apiFetch('/api/usage/' + encodeURIComponent(sid) + '/analysis').then((r) => r.json());
+        const a = await apiFetch(monUrl('/api/usage/' + encodeURIComponent(sid) + '/analysis')).then((r) => r.json());
         const el = convoRow.querySelector('.convo-live');
         if (el) el.innerHTML = monRenderLive(a);
         if (!monIsActive(a)) monStopConvoLive();
@@ -1741,7 +1770,7 @@
   }
   async function monRenderLiveTabFor(sid) {
     try {
-      const a = await apiFetch('/api/usage/' + encodeURIComponent(sid) + '/analysis').then((r) => r.json());
+      const a = await apiFetch(monUrl('/api/usage/' + encodeURIComponent(sid) + '/analysis')).then((r) => r.json());
       // 仍停在 Live 分頁才更新（使用者可能已切走）
       if (!monLiveTabEl.classList.contains('active')) return;
       monLiveTabEl.innerHTML = `<div class="livetab-wrap" data-sid="${monEsc(sid)}">`
@@ -1758,7 +1787,7 @@
     monLiveTabEl.innerHTML = '<div style="color:#888;padding:8px">尋找最近活動 session…</div>';
     let sessions = [];
     try {
-      const usage = await apiFetch('/api/usage').then((r) => r.json());
+      const usage = await apiFetch(monUrl('/api/usage')).then((r) => r.json());
       sessions = usage.sessions || []; // 已按 lastTs desc 排序
     } catch (err) {
       if (err.message === 'unauthorized') return;
@@ -1772,10 +1801,25 @@
     monTabLiveTimer = setInterval(async () => {
       if (!monModal.classList.contains('visible') || !monLiveTabEl.classList.contains('active')) { monStopTabLive(); return; }
       let s2 = [];
-      try { s2 = (await apiFetch('/api/usage').then((r) => r.json())).sessions || []; } catch { return; }
+      try { s2 = (await apiFetch(monUrl('/api/usage')).then((r) => r.json())).sessions || []; } catch { return; }
       if (s2[0]) monRenderLiveTabFor(s2[0].sessionId);
     }, 4000);
   }
+  // Provider 切換器（claude / codex）：切換 → 重抓對應 provider 的資料
+  function monSetProvider(p) {
+    if (p === monProvider) return;
+    monProvider = p;
+    monConvoOpen = false;
+    monStopConvoLive(); monStopTabLive();
+    document.querySelectorAll('#mon-provider .mon-prov').forEach((b) =>
+      b.classList.toggle('active', b.dataset.provider === p));
+    // 切 provider 後若停在 Live 分頁 → 重載該分頁,否則載總覽
+    if (monLiveTabEl.classList.contains('active')) monLoadLiveTab();
+    loadMonitor();
+  }
+  document.querySelectorAll('#mon-provider .mon-prov').forEach((b) =>
+    b.addEventListener('click', () => monSetProvider(b.dataset.provider)));
+
   document.getElementById('monitor-btn').addEventListener('click', openMonitor);
   document.getElementById('mon-close').addEventListener('click', closeMonitor);
 
@@ -1790,7 +1834,7 @@
     if (!confirm('重審歷史：砍索引從頭全掃，重新計算所有既有對話的 token/成本（套用 requestId 去重修正，數字會校正到正確值）並套用目前敏感詞庫。資料量大時較久，確定？')) return;
     monTotals.innerHTML = '<span style="color:#888">重審中（全掃）…</span>';
     try {
-      await apiFetch('/api/usage?rebuild=1').then((r) => r.json());
+      await apiFetch(monUrl('/api/usage?rebuild=1')).then((r) => r.json());
       await loadMonitor();
     } catch (err) {
       if (err.message === 'unauthorized') return;
