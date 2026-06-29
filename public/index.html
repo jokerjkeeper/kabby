@@ -431,7 +431,7 @@
     }
     .modal h2 { font-size: 15px; margin-bottom: 14px; }
     .modal label { display: block; margin: 10px 0 4px; font-size: 12px; color: #aaa; }
-    .modal input, .modal textarea {
+    .modal input, .modal select, .modal textarea {
       width: 100%;
       background: #1e1e1e;
       color: #d4d4d4;
@@ -687,6 +687,13 @@
   <div class="modal-backdrop" id="session-modal">
     <div class="modal">
       <h2 id="sm-title">新建臨時 session</h2>
+      <label for="sm-provider">Provider</label>
+      <select id="sm-provider">
+        <option value="claude">Claude Code</option>
+        <option value="codex">Codex</option>
+      </select>
+      <div class="hint">要啟動的 CLI agent；切換會連動下方預設執行檔與參數。</div>
+
       <label for="sm-name">名稱 *</label>
       <input id="sm-name" type="text" placeholder="例：cc-test" autocomplete="off" />
       <div class="hint">給自己看的識別名，不可與現有活著的 session 重複。</div>
@@ -755,6 +762,13 @@
   <div class="modal-backdrop" id="profile-modal">
     <div class="modal">
       <h2 id="pm-title">新建項目</h2>
+      <label for="pm-provider">Provider</label>
+      <select id="pm-provider">
+        <option value="claude">Claude Code</option>
+        <option value="codex">Codex</option>
+      </select>
+      <div class="hint">要啟動的 CLI agent；切換會連動下方預設執行檔與參數。</div>
+
       <label for="pm-name">項目名稱 *</label>
       <input id="pm-name" type="text" placeholder="例：unity / wepages" autocomplete="off" />
       <div class="hint">用於辨識，跟其他項目不可重名。</div>

@@ -8,6 +8,7 @@ const { WebSocketServer } = require('ws');
 const registry = require('./registry');
 const profileStore = require('./profile-store');
 const ccHistory = require('./cc-history');
+const history = require('./history');
 const ccCollector = require('./cc-collector');
 const usageWatcher = require('./usage-watcher');
 const providers = require('./providers');
@@ -69,10 +70,17 @@ app.get('/api/providers', (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────
 // Profiles
 // ──────────────────────────────────────────────────────────────────────────
-app.get('/api/profiles', (req, res) => {
-  const profiles = profileStore.list().map((p) => {
+app.get('/api/profiles', async (req, res) => {
+  const profiles = await Promise.all(profileStore.list().map(async (p) => {
     const provider = providers.getProvider(p.provider);
     const busy = registry.busyResumeSessionIds(provider.id);
+    let lastSessionId = p.lastSessionId || null;
+    if (provider.historySupported && provider.resumeSupported && !lastSessionId) {
+      try {
+        const items = await history.listHistory(provider.id, p.cwd);
+        lastSessionId = items[0] ? items[0].sessionId : null;
+      } catch {}
+    }
     return {
       ...p,
       provider: provider.id,
@@ -80,9 +88,10 @@ app.get('/api/profiles', (req, res) => {
       historySupported: provider.historySupported,
       resumeSupported: provider.resumeSupported,
       viewerSupported: provider.viewerSupported,
-      lastSessionBusy: provider.resumeSupported && p.lastSessionId ? busy.has(p.lastSessionId) : false,
+      lastSessionId,
+      lastSessionBusy: provider.resumeSupported && lastSessionId ? busy.has(lastSessionId) : false,
     };
-  });
+  }));
   res.json(profiles);
 });
 
@@ -117,9 +126,10 @@ app.get('/api/profiles/:id/history', async (req, res) => {
   const provider = providers.getProvider(profile.provider);
   if (!provider.historySupported) return res.json([]);
   try {
-    const history = await ccHistory.listHistory(profile.cwd);
+    const items = await history.listHistory(provider.id, profile.cwd);
     const busy = registry.busyResumeSessionIds(provider.id);
-    res.json(history.map((h) => ({ ...h, busy: busy.has(h.sessionId) })));
+    res.json(items.map((h) => ({ ...h, busy: busy.has(h.sessionId) })));
+
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -132,7 +142,7 @@ app.get('/api/profiles/:id/history-dir', (req, res) => {
   if (!provider.historySupported) {
     return res.json({ dir: null, exists: false, unsupported: true, provider: provider.id });
   }
-  const dir = ccHistory.projectDir(profile.cwd);
+  const dir = history.projectDir(provider.id, profile.cwd);
   res.json({ dir, exists: fs.existsSync(dir), provider: provider.id });
 });
 

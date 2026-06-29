@@ -57,6 +57,7 @@
   let viewerConfigured = false;
   const expandedProfiles = new Set();      // 哪些 profile 卡片是展開的
   const historyCache = new Map();          // profileId → history array
+  let allProfiles = [];                    // 最近一次 fetch 的 profiles（sidebar 與 modal 共用）
 
   // ──────────────────────────────────────────────────────────────────────
   // DOM refs
@@ -207,51 +208,7 @@
     }
     profileListEl.innerHTML = '';
     for (const p of profiles) {
-      const card = document.createElement('div');
-      card.className = 'profile-card' + (expandedProfiles.has(p.id) ? ' expanded' : '');
-      card.dataset.id = p.id;
-
-      const head = document.createElement('div');
-      head.className = 'profile-head';
-      head.innerHTML = `
-        <div class="profile-name">
-          <span>${escapeHtml(p.name)}</span>
-          ${p.lastSessionBusy ? '<span class="badge warn">last 掛載中</span>' : ''}
-        </div>
-        <div class="profile-meta">${escapeHtml(shorten(p.cwd, 38))}</div>
-        <div class="profile-meta">最近：${escapeHtml(timeAgo(p.lastUsedAt))}</div>
-      `;
-      head.addEventListener('click', () => toggleProfile(p.id));
-      card.appendChild(head);
-
-      const body = document.createElement('div');
-      body.className = 'profile-body';
-      body.innerHTML = `
-        <div class="profile-actions">
-          <button class="btn primary tiny" data-action="new-chat">新對話</button>
-          <button class="btn tiny" data-action="resume-last" ${p.lastSessionId && !p.lastSessionBusy ? '' : 'disabled'}>接續上次</button>
-          <button class="btn tiny" data-action="edit">編輯</button>
-          <button class="btn tiny" data-action="open-folder">歷史目錄</button>
-          <button class="btn danger tiny" data-action="delete">刪除</button>
-        </div>
-        <div class="history-list" data-history-list>
-          <div class="empty">點開項目自動讀取歷史…</div>
-        </div>
-      `;
-      card.appendChild(body);
-
-      body.querySelector('[data-action="new-chat"]').addEventListener('click', (e) => { e.stopPropagation(); launchProfile(p.id); });
-      body.querySelector('[data-action="resume-last"]').addEventListener('click', (e) => { e.stopPropagation(); if (p.lastSessionId) launchProfile(p.id, p.lastSessionId); });
-      body.querySelector('[data-action="edit"]').addEventListener('click', (e) => { e.stopPropagation(); openProfileModal(p); });
-      body.querySelector('[data-action="open-folder"]').addEventListener('click', (e) => { e.stopPropagation(); openHistoryFolder(p.id); });
-      body.querySelector('[data-action="delete"]').addEventListener('click', (e) => { e.stopPropagation(); deleteProfile(p.id, p.name); });
-
-      profileListEl.appendChild(card);
-
-      // 若已展開，載入歷史列表
-      if (expandedProfiles.has(p.id)) {
-        renderHistoryList(p.id, body.querySelector('[data-history-list]'));
-      }
+      profileListEl.appendChild(createProfileCard(p, expandedProfiles, toggleProfile));
     }
   }
 
@@ -338,10 +295,10 @@
         </div>
       `;
       if (!h.busy) {
-        item.title = '點擊接續這個 cc session';
+        item.title = '點擊接續這個 session';
         item.addEventListener('click', () => launchProfile(profileId, h.sessionId));
       } else {
-        item.title = '此 cc session 已被另一個 kabby session 掛載中';
+        item.title = '此 session 已被另一個 kabby session 掛載中';
       }
       container.appendChild(item);
     }
@@ -434,7 +391,7 @@
           <span>${escapeHtml(s.name)}</span>
           <span class="badge">${s.clientCount} clt</span>
           ${isAttached ? '<span class="badge" title="已在某個 pane 開啟">開啟中</span>' : ''}
-          ${s.ccSessionId ? '<span class="badge" title="cc session id">resumed</span>' : ''}
+          ${s.resumeSessionId ? `<span class="badge" title="${escapeHtml((s.provider || 'session') + ' resume id')}">resumed</span>` : ''}
         </div>
         <div class="session-meta">${escapeHtml(shorten(s.cwd, 36))}</div>
       `;
@@ -464,6 +421,7 @@
   async function refreshProfiles() {
     if (locked) return;
     const profiles = await fetchProfiles();
+    allProfiles = profiles;
     renderProfiles(profiles);
   }
 
@@ -1066,8 +1024,10 @@
     const s = leaf.info || {};
     statusText.textContent = leaf.connected ? `${s.name} · connected` : `${s.name} · disconnected`;
     statusText.style.color = leaf.connected ? '#4caf50' : '#f44336';
-    const ccTail = s.ccSessionId ? ` · cc:${s.ccSessionId.slice(0, 8)}` : '';
-    metaEl.textContent = `${shorten(s.cwd || '', 50)} · ${s.cols || '?'}x${s.rows || '?'}${ccTail}`;
+    const resumeTail = s.resumeSessionId
+      ? ` · ${s.provider === 'codex' ? 'codex' : 'cc'}:${s.resumeSessionId.slice(0, 8)}`
+      : '';
+    metaEl.textContent = `${shorten(s.cwd || '', 50)} · ${s.cols || '?'}x${s.rows || '?'}${resumeTail}`;
     killBtn.style.display = '';
     redrawBtn.style.display = '';
     splitHBtn.style.display = '';
@@ -1094,6 +1054,7 @@
   // ──────────────────────────────────────────────────────────────────────
   const sm = {
     modal: document.getElementById('session-modal'),
+    provider: document.getElementById('sm-provider'),
     name: document.getElementById('sm-name'),
     cwd: document.getElementById('sm-cwd'),
     cmd: document.getElementById('sm-cmd'),
@@ -1129,7 +1090,7 @@
   async function smSubmit() {
     const name = sm.name.value.trim();
     if (!name) { sm.err.textContent = '請輸入名稱'; return; }
-    const body = { name };
+    const body = { name, provider: sm.provider.value || 'claude' };
     if (sm.cwd.value.trim()) body.cwd = sm.cwd.value.trim();
     if (sm.cmd.value.trim()) body.cmd = sm.cmd.value.trim();
     const args = parseArgsRaw(sm.args.value);
@@ -1160,6 +1121,7 @@
   const pm = {
     modal: document.getElementById('profile-modal'),
     title: document.getElementById('pm-title'),
+    provider: document.getElementById('pm-provider'),
     name: document.getElementById('pm-name'),
     cwd: document.getElementById('pm-cwd'),
     cmd: document.getElementById('pm-cmd'),
@@ -1177,6 +1139,7 @@
     if (profile) {
       pm.editingId = profile.id;
       pm.title.textContent = '編輯項目：' + profile.name;
+      pm.provider.value = profile.provider || 'claude';
       pm.name.value = profile.name;
       pm.cwd.value = profile.cwd;
       pm.cmd.value = profile.cmd || '';
@@ -1185,6 +1148,7 @@
     } else {
       pm.editingId = null;
       pm.title.textContent = '新建項目';
+      pm.provider.value = 'claude';
       pm.name.value = pm.cwd.value = pm.cmd.value = pm.args.value = '';
       pm.del.style.display = 'none';
     }
@@ -1212,7 +1176,7 @@
     const cwd = pm.cwd.value.trim();
     if (!name) { pm.err.textContent = '請輸入項目名稱'; return; }
     if (!cwd) { pm.err.textContent = '請輸入工作目錄'; return; }
-    const body = { name, cwd };
+    const body = { name, cwd, provider: pm.provider.value || 'claude' };
     if (pm.cmd.value.trim()) body.cmd = pm.cmd.value.trim();
     const args = pm.args.value.trim() ? parseArgsRaw(pm.args.value) : [];
     body.args = args;
