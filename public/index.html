@@ -498,6 +498,9 @@
     .projects-detail .profile-card { margin: 0; }
     .projects-detail .profile-card .profile-body { display: flex; }  /* 永遠展開 */
     .projects-detail .profile-head { cursor: default; }
+    /* 歷史列表拉高到 modal 約 70~80%（覆寫側欄用的 240px），長路徑換行不橫向捲動 */
+    .projects-detail .history-list { max-height: 62vh; overflow-x: hidden; }
+    .projects-detail .history-item { word-break: break-word; overflow-wrap: anywhere; }
     .ap-detail-empty { color: #666; font-size: 12px; padding: 30px 10px; text-align: center; line-height: 1.6; }
     .ap-empty { color: #777; font-size: 12px; padding: 28px; text-align: center; }
     /* /rename 自訂名標記 */
