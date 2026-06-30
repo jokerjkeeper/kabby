@@ -482,12 +482,23 @@
     .projects-actions #ap-search { width: 230px; margin: 0; }
     .ap-view-toggle { display: flex; gap: 2px; }
     .ap-view-toggle .btn.tiny.active { background: #094771; color: #fff; border-color: #0e639c; }
-    .projects-body { flex: 1; overflow-y: auto; margin-top: 12px; padding-right: 2px; }
-    .projects-body.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; align-content: start; }
+    /* 左:卡片清單(grid/list) + 右:詳情面板，兩欄 flex */
+    .projects-main { flex: 1; display: flex; gap: 12px; margin-top: 12px; min-height: 0; }
+    .projects-body { flex: 1; overflow-y: auto; padding-right: 2px; }
+    .projects-body.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; align-content: start; }
     .projects-body.list { display: flex; flex-direction: column; gap: 6px; }
-    /* modal 內複用 .profile-card，但拿掉側欄用的外距 */
-    .projects-body .profile-card { margin: 0; }
-    .projects-body.list .profile-card .profile-meta { display: inline-block; margin-right: 12px; }
+    /* 緊湊卡片：點擊選進右側詳情，不就地展開 */
+    .ap-card { background: #2a2a2b; border: 1px solid #333; border-radius: 4px; padding: 8px 10px;
+      cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+    .ap-card:hover { background: #313132; border-color: #444; }
+    .ap-card.selected { border-color: #0e639c; background: #0c2a3f; }
+    .projects-body.list .ap-card .profile-meta { display: inline-block; margin-right: 12px; }
+    /* 右側詳情面板 */
+    .projects-detail { flex: 0 0 320px; overflow-y: auto; border-left: 1px solid #333; padding-left: 12px; }
+    .projects-detail .profile-card { margin: 0; }
+    .projects-detail .profile-card .profile-body { display: flex; }  /* 永遠展開 */
+    .projects-detail .profile-head { cursor: default; }
+    .ap-detail-empty { color: #666; font-size: 12px; padding: 30px 10px; text-align: center; line-height: 1.6; }
     .ap-empty { color: #777; font-size: 12px; padding: 28px; text-align: center; }
     /* /rename 自訂名標記 */
     .history-item .title { color: #6cc04a; font-weight: 600; }
@@ -903,7 +914,10 @@
           <button class="btn" id="ap-close">關閉</button>
         </div>
       </div>
-      <div class="projects-body" id="ap-body"></div>
+      <div class="projects-main">
+        <div class="projects-body" id="ap-body"></div>
+        <div class="projects-detail" id="ap-detail"></div>
+      </div>
     </div>
   </div>
 

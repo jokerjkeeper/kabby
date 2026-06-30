@@ -56,7 +56,7 @@
   const MAX_PANES_PER_TAB = 4;
   let viewerConfigured = false;
   const expandedProfiles = new Set();      // 側欄哪些 profile 卡片是展開的
-  const expandedModalProfiles = new Set(); // 「全部項目」modal 裡哪些卡片展開（與側欄獨立）
+  let modalSelectedId = null;              // 「全部項目」modal 右側詳情面板目前選的項目
   const historyCache = new Map();          // profileId → history array
   let allProfiles = [];                    // 最近一次抓到的完整項目清單（sidebar 與 modal 共用）
   let projectsView = localStorage.getItem('kabby-projects-view') || 'grid';  // modal 版型：'grid' | 'list'
@@ -251,18 +251,8 @@
     await refreshProfiles();
   }
 
-  // ── 「全部項目」modal ──────────────────────────────────────────────
-  async function toggleModalProfile(id) {
-    const profile = allProfiles.find((p) => p.id === id);
-    if (expandedModalProfiles.has(id)) {
-      expandedModalProfiles.delete(id);
-    } else {
-      expandedModalProfiles.add(id);
-      if (!profile || profile.historySupported) await fetchHistory(id);
-    }
-    renderProjectsModal();
-  }
-
+  // ── 「全部項目」modal（左:緊湊卡片 grid/list；右:選取項目的操作+歷史詳情）──
+  //   不在 grid 內就地展開（會把卡片撐高、打亂排版），改成點卡片 → 右側詳情面板。
   function renderProjectsModal() {
     const body = document.getElementById('ap-body');
     if (!body) return;
@@ -278,13 +268,47 @@
     apListBtn.classList.toggle('active', projectsView === 'list');
     body.className = 'projects-body ' + projectsView;
     body.innerHTML = '';
+    // 選取的項目被搜尋濾掉 → 清空選取
+    if (modalSelectedId && !list.some((p) => p.id === modalSelectedId)) modalSelectedId = null;
     if (!list.length) {
       body.innerHTML = '<div class="ap-empty">沒有符合的項目。</div>';
+    } else {
+      for (const p of list) body.appendChild(createModalGridCard(p));
+    }
+    renderModalDetail();
+  }
+
+  // 緊湊卡片：只有名稱/路徑/最近活動，點擊 → 選進右側詳情（不就地展開）
+  function createModalGridCard(p) {
+    const card = document.createElement('div');
+    card.className = 'ap-card' + (p.id === modalSelectedId ? ' selected' : '');
+    card.dataset.id = p.id;
+    card.innerHTML = `
+      <div class="profile-name"><span>${escapeHtml(p.name)}</span>${p.lastSessionBusy ? '<span class="badge warn">last 掛載中</span>' : ''}</div>
+      <div class="profile-meta">${escapeHtml(shorten(p.cwd, 32))}</div>
+      <div class="profile-meta">最近：${escapeHtml(timeAgo(p.lastUsedAt))}</div>`;
+    card.addEventListener('click', () => selectModalProfile(p.id));
+    return card;
+  }
+
+  async function selectModalProfile(id) {
+    modalSelectedId = id;
+    const profile = allProfiles.find((p) => p.id === id);
+    if (!profile || profile.historySupported) await fetchHistory(id); // 預抓歷史
+    renderProjectsModal();
+  }
+
+  // 右側詳情：複用 createProfileCard（永遠展開、head 點擊不收合）→ 操作鈕 + 歷史列表
+  function renderModalDetail() {
+    const detail = document.getElementById('ap-detail');
+    if (!detail) return;
+    const p = modalSelectedId && allProfiles.find((x) => x.id === modalSelectedId);
+    if (!p) {
+      detail.innerHTML = '<div class="ap-detail-empty">← 點左側項目，這裡顯示操作與歷史</div>';
       return;
     }
-    for (const p of list) {
-      body.appendChild(createProfileCard(p, expandedModalProfiles, toggleModalProfile));
-    }
+    detail.innerHTML = '';
+    detail.appendChild(createProfileCard(p, { has: () => true }, () => {}));
   }
 
   function openProjectsModal() {
