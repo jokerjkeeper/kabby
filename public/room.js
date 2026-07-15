@@ -14,6 +14,12 @@
   let reconnectTimer = null;
   let reconnectAttempts = 0;
   let closedByServer = false;
+  // 畫面跟隨控制：frozen=true 時進來的輸出先暫存，不寫進終端（訪客慢慢看）
+  let frozen = false;
+  let pendingOutput = [];
+  let pendingBytes = 0;
+  let pendingOverflow = false;
+  const PENDING_MAX = 2 * 1024 * 1024;   // 暫存上限；爆掉就整屏重來（reset + 尾段）
 
   // ── DOM ──
   const overlay = document.getElementById('overlay');
@@ -219,16 +225,67 @@
         scrollback: 5000,
         allowProposedApi: true,
       });
-      term.open(document.getElementById('term-side'));
+      const termSide = document.getElementById('term-side');
+      term.open(termSide);
       term.onData((data) => {
         if (!allowWrite) return;   // 前端輔助；伺服器端也會擋
         if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
       });
+      // 滾輪 = 純本地捲動（capture 搶在 xterm 前面）。
+      // 不攔的話 xterm 會把滾輪轉成方向鍵/滑鼠事件送給 cc → cc 捲動重繪 → 所有人畫面一起動。
+      // 這裡讓訪客的滾輪只捲自己的 scrollback，永不影響共享畫面。
+      termSide.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const lines = e.deltaMode === 1 ? Math.round(e.deltaY) : Math.round(e.deltaY / 33) || Math.sign(e.deltaY);
+        term.scrollLines(lines);
+        updateScrollIndicator();
+      }, { passive: false, capture: true });
+      term.onScroll(() => updateScrollIndicator());
     } else {
       term.reset();
     }
+    setFrozen(false, true);
     connect();
   }
+
+  // ── 畫面跟隨控制 ──
+  const pauseBtn = document.getElementById('pause-btn');
+  const frozenHint = document.getElementById('frozen-hint');
+  const scrollLatestBtn = document.getElementById('scroll-latest');
+
+  function atBottom() {
+    if (!term) return true;
+    const buf = term.buffer.active;
+    return buf.viewportY >= buf.baseY;
+  }
+  function updateScrollIndicator() {
+    scrollLatestBtn.classList.toggle('visible', frozen || !atBottom());
+  }
+  function setFrozen(v, silent) {
+    frozen = !!v;
+    pauseBtn.classList.toggle('paused', frozen);
+    pauseBtn.textContent = frozen ? '▶ 恢復跟隨' : '⏸ 暫停跟隨';
+    frozenHint.classList.toggle('visible', frozen);
+    if (!frozen) {
+      // 恢復：補上暫存的輸出；爆過量就重置終端只寫尾段（避免卡死）
+      if (pendingOverflow && term) term.reset();
+      if (pendingOutput.length && term) term.write(pendingOutput.join(''));
+      pendingOutput = [];
+      pendingBytes = 0;
+      pendingOverflow = false;
+      if (term) term.scrollToBottom();
+      if (!silent) showToast('已恢復跟隨最新畫面');
+    } else if (!silent) {
+      showToast('已暫停跟隨：畫面凍結，新輸出暫存中', 'warn');
+    }
+    updateScrollIndicator();
+  }
+  pauseBtn.addEventListener('click', () => setFrozen(!frozen));
+  scrollLatestBtn.addEventListener('click', () => {
+    if (frozen) setFrozen(false);
+    else if (term) { term.scrollToBottom(); updateScrollIndicator(); }
+  });
 
   function setAllowWrite(v, silent) {
     allowWrite = !!v;
@@ -264,7 +321,11 @@
         return;
       }
       if (reconnectTimer) clearTimeout(reconnectTimer);
-      reconnectTimer = setTimeout(() => { if (term) term.reset(); connect(); }, 3000);
+      reconnectTimer = setTimeout(() => {
+        if (term) term.reset();
+        setFrozen(false, true);   // 重連 replay 全量畫面，凍結狀態沒意義
+        connect();
+      }, 3000);
     };
     ws.onerror = () => { try { ws.close(); } catch {} };
   }
@@ -273,7 +334,18 @@
     switch (msg.type) {
       case 'output':
         reconnectAttempts = 0;
-        if (term) term.write(msg.data);
+        if (frozen) {
+          // 凍結中：暫存輸出不上屏。超過上限就標記 overflow，恢復時 reset 只寫尾段
+          pendingOutput.push(msg.data);
+          pendingBytes += msg.data.length;
+          while (pendingBytes > PENDING_MAX && pendingOutput.length > 1) {
+            pendingBytes -= pendingOutput.shift().length;
+            pendingOverflow = true;
+          }
+        } else if (term) {
+          term.write(msg.data);
+          updateScrollIndicator();
+        }
         break;
       case 'termsize':
         // 跟隨 PTY 尺寸（訪客不能 resize，只能遷就）；超出視窗由容器捲動

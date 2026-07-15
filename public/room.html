@@ -49,6 +49,23 @@
     #layout { flex: 1; display: flex; min-height: 0; }
     #term-side { flex: 1 1 auto; min-width: 0; position: relative; overflow: auto; background: #1e1e1e; padding: 4px; }
     #term-side .xterm { height: auto; }
+    /* 「回到最新」浮鈕：訪客往上捲（本地）時出現 */
+    #scroll-latest {
+      position: absolute; right: 18px; bottom: 14px; z-index: 20;
+      background: #0e639c; color: #fff; border: 0; border-radius: 14px;
+      padding: 5px 14px; font-size: 12px; cursor: pointer;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.5); display: none;
+    }
+    #scroll-latest:hover { background: #1177bb; }
+    #scroll-latest.visible { display: block; }
+    /* 暫停跟隨中的狀態 */
+    #pause-btn.paused { background: #5a4a1d; color: #ffd97a; }
+    #frozen-hint {
+      position: absolute; left: 50%; top: 8px; transform: translateX(-50%); z-index: 20;
+      background: rgba(90,74,29,0.95); color: #ffd97a; border-radius: 12px;
+      padding: 3px 14px; font-size: 11px; display: none; pointer-events: none;
+    }
+    #frozen-hint.visible { display: block; }
 
     #chat-side {
       flex: 0 0 var(--chat-w, 300px);
@@ -183,11 +200,15 @@
     <span class="perm-badge ro" id="perm-badge">唯讀</span>
     <span class="spacer"></span>
     <span class="me" id="me-nick"></span>
+    <button class="btn" id="pause-btn" style="background:#3c3c3c" title="凍結終端畫面（暫停跟隨輸出，方便慢慢看；聊天不受影響）">⏸ 暫停跟隨</button>
     <button class="btn" id="leave-btn" style="background:#3c3c3c" title="離開聊天室（清掉本機入場券）">離開</button>
   </div>
 
   <div id="layout">
-    <div id="term-side"></div>
+    <div id="term-side">
+      <div id="frozen-hint">⏸ 已暫停跟隨 — 新輸出暫存中，點「恢復跟隨」補上</div>
+      <button id="scroll-latest">↓ 回到最新</button>
+    </div>
     <aside id="chat-side">
       <div id="chat-resize" title="拖曳調整聊天欄寬度"></div>
       <div id="chat-head"><span>聊天</span><span id="guest-count"></span></div>
