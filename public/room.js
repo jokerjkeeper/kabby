@@ -265,7 +265,7 @@
   function setFrozen(v, silent) {
     frozen = !!v;
     pauseBtn.classList.toggle('paused', frozen);
-    pauseBtn.textContent = frozen ? '▶ 恢復跟隨' : '⏸ 暫停跟隨';
+    pauseBtn.textContent = frozen ? '▶ 回房主畫面' : '⏸ 看自己畫面';
     frozenHint.classList.toggle('visible', frozen);
     if (!frozen) {
       // 恢復：補上暫存的輸出；爆過量就重置終端只寫尾段（避免卡死）
@@ -275,9 +275,9 @@
       pendingBytes = 0;
       pendingOverflow = false;
       if (term) term.scrollToBottom();
-      if (!silent) showToast('已恢復跟隨最新畫面');
+      if (!silent) showToast('已切回房主畫面（即時跟隨）');
     } else if (!silent) {
-      showToast('已暫停跟隨：畫面凍結，新輸出暫存中', 'warn');
+      showToast('已切到自己畫面：定格不動，房主的新輸出暫存中', 'warn');
     }
     updateScrollIndicator();
   }
