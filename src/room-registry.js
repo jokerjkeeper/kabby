@@ -25,6 +25,7 @@ class Room {
     this.guests = new Map();      // ticket → { nickname, joinedAt, ws|null }
     this.hostSockets = new Set(); // 房主聊天面板的 WS（/ws/room/:id）
     this.chatLog = [];            // { from:'host'|'guest'|'system', nickname, text, ts }
+    this.ccSessionId = null;      // 對話記錄定位到的 JSONL session id 快取（免每次刷新重掃目錄）
   }
 
   addChat(entry) {

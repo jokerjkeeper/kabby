@@ -83,29 +83,32 @@ function readFirstUserMessage(filePath) {
     const rl = readline.createInterface({ input: stream });
     let resolved = false;
     let lineCount = 0;
+    // 提早收工必須 destroy 底層 stream：rl.close() 不會關 fd，
+    // 之前只 close 導致每個檔案洩漏一個 fd，列大目錄幾輪就 EMFILE
+    const finish = (result) => {
+      if (resolved) return;
+      resolved = true;
+      rl.close();
+      stream.destroy();
+      resolve(result);
+    };
     rl.on('line', (line) => {
+      if (resolved) return;
       lineCount++;
       if (lineCount > 50) {       // 太多行還沒找到 user 訊息就放棄
-        if (!resolved) {
-          resolved = true;
-          rl.close();
-          resolve({ summary: '', timestamp: null });
-        }
+        finish({ summary: '', timestamp: null });
         return;
       }
-      if (resolved) return;
       let obj;
       try { obj = JSON.parse(line); } catch { return; }
       if (obj && obj.type === 'user' && obj.message) {
         const content = obj.message.content;
         const text = extractText(content);
-        resolved = true;
-        rl.close();
-        resolve({ summary: shorten(stripTags(text), 120), timestamp: obj.timestamp || null });
+        finish({ summary: shorten(stripTags(text), 120), timestamp: obj.timestamp || null });
       }
     });
-    rl.on('close', () => { if (!resolved) resolve({ summary: '', timestamp: null }); });
-    rl.on('error', reject);
+    rl.on('close', () => { if (!resolved) { resolved = true; resolve({ summary: '', timestamp: null }); } });
+    rl.on('error', (err) => { stream.destroy(); reject(err); });
   });
 }
 

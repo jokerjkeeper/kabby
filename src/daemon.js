@@ -115,17 +115,22 @@ app.get('/api/rooms/guest/conversation', async (req, res) => {
   }
   try {
     // 定位這個 PTY 對應的對話 JSONL：resume 的直接用該 id；
-    // 否則取該 cwd 下「PTY 啟動後仍有更新」的最新一份（cc 啟動即建檔、活躍中 mtime 持續前進）
-    let ccSessionId = session.resumeSessionId;
+    // 否則取該 cwd 下「PTY 啟動後仍有更新」的最新一份（cc 啟動即建檔、活躍中 mtime 持續前進）。
+    // 定位結果快取在房間上——這個 endpoint 被前端每 8 秒輪詢，不要每次都重掃整個歷史目錄
+    let ccSessionId = session.resumeSessionId || resolved.room.ccSessionId;
     if (!ccSessionId) {
       const items = await history.listHistory(provider.id, session.cwd);
       const started = new Date(session.createdAt).getTime();
       const hit = items.find((h) => h.mtime >= started);
       ccSessionId = hit ? hit.sessionId : null;
+      if (ccSessionId) resolved.room.ccSessionId = ccSessionId;
     }
     if (!ccSessionId) return res.json({ turns: [], notFound: true });
     const convo = await collectorFor(provider.id).readConversation(ccSessionId);
-    if (!convo) return res.json({ turns: [], notFound: true });
+    if (!convo) {
+      resolved.room.ccSessionId = null;   // 檔案不見了（罕見）→ 下次重新定位
+      return res.json({ turns: [], notFound: true });
+    }
     res.json({ turns: convo.turns || [] });   // 不回 file 等本機路徑資訊
   } catch (err) {
     res.status(500).json({ error: err.message });

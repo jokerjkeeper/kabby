@@ -66,27 +66,29 @@ function readFirstUserMessage(filePath) {
     const rl = readline.createInterface({ input: stream });
     let resolved = false;
     let lineCount = 0;
+    // 提早收工必須 destroy 底層 stream：rl.close() 不會關 fd（見 cc-history 同處註解）
+    const finish = (result) => {
+      if (resolved) return;
+      resolved = true;
+      rl.close();
+      stream.destroy();
+      resolve(result);
+    };
     rl.on('line', (line) => {
+      if (resolved) return;
       lineCount++;
       if (lineCount > 80) {
-        if (!resolved) {
-          resolved = true;
-          rl.close();
-          resolve('');
-        }
+        finish('');
         return;
       }
-      if (resolved) return;
       let obj;
       try { obj = JSON.parse(line); } catch { return; }
       const msg = extractUserMessage(obj);
       if (!msg) return;
-      resolved = true;
-      rl.close();
-      resolve(shorten(msg.replace(/\s+/g, ' ').trim(), 120));
+      finish(shorten(msg.replace(/\s+/g, ' ').trim(), 120));
     });
-    rl.on('close', () => { if (!resolved) resolve(''); });
-    rl.on('error', reject);
+    rl.on('close', () => { if (!resolved) { resolved = true; resolve(''); } });
+    rl.on('error', (err) => { stream.destroy(); reject(err); });
   });
 }
 
