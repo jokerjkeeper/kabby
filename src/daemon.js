@@ -6,6 +6,7 @@ const express = require('express');
 const cors = require('cors');
 const { WebSocketServer } = require('ws');
 const registry = require('./registry');
+const roomRegistry = require('./room-registry');
 const profileStore = require('./profile-store');
 const ccHistory = require('./cc-history');
 const history = require('./history');
@@ -64,7 +65,44 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// 其餘 /api/* 一律要 token（health 已在上面先處理，不受影響）
+// 訪客入房（不需 AUTH_TOKEN — 訪客只有房間 key）。放在 token middleware 之前。
+// 防爆破：同 IP 連續猜錯 key 超過上限 → 暫時拒絕。
+const joinFails = new Map(); // ip → { count, resetAt }
+const JOIN_FAIL_LIMIT = 10;
+const JOIN_FAIL_WINDOW_MS = 5 * 60 * 1000;
+app.post('/api/rooms/join', (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || '?';
+  const now = Date.now();
+  const rec = joinFails.get(ip);
+  if (rec && rec.resetAt > now && rec.count >= JOIN_FAIL_LIMIT) {
+    return res.status(429).json({ error: '嘗試次數過多，請稍後再試' });
+  }
+  const { key, nickname } = req.body || {};
+  if (!key || typeof key !== 'string') return res.status(400).json({ error: 'key 必填' });
+  const nick = (typeof nickname === 'string' ? nickname.trim() : '').slice(0, 24);
+  if (!nick) return res.status(400).json({ error: '暱稱必填' });
+
+  const joined = roomRegistry.join(key.trim(), nick);
+  if (!joined) {
+    const cur = rec && rec.resetAt > now ? rec : { count: 0, resetAt: now + JOIN_FAIL_WINDOW_MS };
+    cur.count += 1;
+    joinFails.set(ip, cur);
+    return res.status(404).json({ error: 'key 不正確或房間不存在' });
+  }
+  joinFails.delete(ip);
+  const { room, ticket } = joined;
+  res.json({
+    ticket,
+    roomId: room.id,
+    roomName: room.name,
+    sessionId: room.sessionId,
+    sessionName: room.sessionName,
+    allowWrite: room.allowWrite,
+    nickname: nick,
+  });
+});
+
+// 其餘 /api/* 一律要 token（health / rooms/join 已在上面先處理，不受影響）
 app.use('/api', (req, res, next) => {
   if (tokenOk(req)) return next();
   res.status(401).json({ error: 'unauthorized' });
@@ -238,6 +276,53 @@ app.post('/api/viewer/open-folder', (req, res) => {
   }
 });
 
+// ──────────────────────────────────────────────────────────────────────────
+// Rooms（聊天室）— 房主管理端（需 AUTH_TOKEN）；訪客入口是上面的 /api/rooms/join
+// ──────────────────────────────────────────────────────────────────────────
+app.get('/api/rooms', (req, res) => {
+  res.json(roomRegistry.list());
+});
+
+app.post('/api/rooms', (req, res) => {
+  const { name, key, sessionId, allowWrite } = req.body || {};
+  const session = registry.get(sessionId) || registry.getByName(sessionId);
+  if (!session || !session.alive) {
+    return res.status(400).json({ error: '綁定的 session 不存在或已結束' });
+  }
+  try {
+    const room = roomRegistry.create({
+      name: name || `${session.name} 聊天室`,
+      key,
+      sessionId: session.id,
+      sessionName: session.name,
+      allowWrite,
+    });
+    // session 結束（exit / 被殺）→ 連帶關房、通知所有成員
+    session.on('exit', () => roomRegistry.closeForSession(session.id, 'session-exit'));
+    res.status(201).json(room.toJSON());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/rooms/:id', (req, res) => {
+  const room = roomRegistry.get(req.params.id);
+  if (!room) return res.status(404).json({ error: 'not found' });
+  const { allowWrite } = req.body || {};
+  if (typeof allowWrite === 'boolean' && allowWrite !== room.allowWrite) {
+    room.allowWrite = allowWrite;
+    room.broadcast({ type: 'room-config', allowWrite });
+    roomSystemMsg(room, allowWrite ? '房主開放了終端輸入' : '房主改為唯讀模式');
+  }
+  res.json(room.toJSON());
+});
+
+app.delete('/api/rooms/:id', (req, res) => {
+  const ok = roomRegistry.destroy(req.params.id, 'host-closed');
+  if (!ok) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true });
+});
+
 app.get('/api/sessions', (req, res) => {
   res.json(registry.list());
 });
@@ -380,14 +465,27 @@ httpServer.on('upgrade', (req, socket, head) => {
     return;
   }
 
+  // 房主聊天面板 WS（chat-only，不串終端）：/ws/room/:roomId，需 token
+  const roomMatch = url.pathname.match(/^\/ws\/room\/([^/]+)$/);
+  if (roomMatch) {
+    if (AUTH_TOKEN && url.searchParams.get('token') !== AUTH_TOKEN) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    const room = roomRegistry.get(decodeURIComponent(roomMatch[1]));
+    if (!room || room.closed) {
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => handleRoomHostConnection(ws, room));
+    return;
+  }
+
   const match = url.pathname.match(/^\/ws\/([^/]+)$/);
   if (!match) {
     socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
-    socket.destroy();
-    return;
-  }
-  if (AUTH_TOKEN && url.searchParams.get('token') !== AUTH_TOKEN) {
-    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     socket.destroy();
     return;
   }
@@ -398,28 +496,99 @@ httpServer.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
+  // 認證：房主 token（完整權限）或訪客 ticket（僅限該房綁定的 session、受房間權限管制）
+  const isHost = !AUTH_TOKEN || url.searchParams.get('token') === AUTH_TOKEN;
+  let guestCtx = null;
+  const ticket = url.searchParams.get('ticket');
+  if (ticket) {
+    const resolved = roomRegistry.resolveTicket(ticket);
+    if (resolved && resolved.room.sessionId === session.id) guestCtx = resolved;
+  }
+  if (!isHost && !guestCtx) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    socket.destroy();
+    return;
+  }
   wss.handleUpgrade(req, socket, head, (ws) => {
-    handleConnection(ws, session);
+    handleConnection(ws, session, guestCtx);
   });
 });
 
-function handleConnection(ws, session) {
-  console.log(`[ws] attach session=${session.name} (${session.id.slice(0,8)}) clients=${session.clients.size + 1}`);
+// 房間聊天訊息：入 log + 廣播給房內所有成員
+function roomChat(room, { from, nickname, text }) {
+  if (typeof text !== 'string') return;
+  const clean = text.slice(0, 2000).trim();
+  if (!clean) return;
+  const entry = room.addChat({ from, nickname: nickname || '', text: clean, ts: new Date().toISOString() });
+  room.broadcast({ type: 'chat', ...entry });
+}
+
+function roomSystemMsg(room, text) {
+  roomChat(room, { from: 'system', nickname: '', text });
+}
+
+// 房主聊天面板 WS：只收發聊天，不碰終端
+function handleRoomHostConnection(ws, room) {
+  room.hostSockets.add(ws);
+  ws.send(JSON.stringify({ type: 'room-init', room: room.toJSON(), chatLog: room.chatLog }));
+
+  ws.on('message', (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (msg.type === 'chat') roomChat(room, { from: 'host', nickname: '房主', text: msg.text });
+  });
+  ws.on('close', () => room.hostSockets.delete(ws));
+  ws.on('error', () => room.hostSockets.delete(ws));
+}
+
+// 終端 WS。guestCtx 有值 = 訪客連線：input 受房間 allowWrite 管制、resize 一律忽略、可收發聊天
+function handleConnection(ws, session, guestCtx) {
+  const who = guestCtx ? `guest:${guestCtx.guest.nickname}` : 'host';
+  console.log(`[ws] attach session=${session.name} (${session.id.slice(0,8)}) ${who} clients=${session.clients.size + 1}`);
   session.attach(ws);
+
+  if (guestCtx) {
+    const { room, guest } = guestCtx;
+    // 同 ticket 重複連線（多分頁）→ 踢掉舊的，保留最新
+    if (guest.ws && guest.ws !== ws) { try { guest.ws.close(); } catch {} }
+    guest.ws = ws;
+    ws.send(JSON.stringify({
+      type: 'room-init',
+      room: { id: room.id, name: room.name, allowWrite: room.allowWrite, sessionName: room.sessionName },
+      nickname: guest.nickname,
+      chatLog: room.chatLog,
+      guests: room.presence(),
+    }));
+    room.broadcast({ type: 'room-presence', guests: room.presence() });
+    roomSystemMsg(room, `${guest.nickname} 加入了聊天室`);
+  }
 
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (msg.type === 'input' && typeof msg.data === 'string') {
+      // 訪客輸入：唯讀房間直接丟棄（伺服器端強制，前端只是輔助 UI）
+      if (guestCtx && !guestCtx.room.allowWrite) return;
       session.write(msg.data);
     } else if (msg.type === 'resize' && Number.isFinite(msg.cols) && Number.isFinite(msg.rows)) {
+      if (guestCtx) return;   // 訪客不許 resize（會弄亂房主畫面）
       session.resize(msg.cols, msg.rows);
+    } else if (msg.type === 'chat' && guestCtx) {
+      roomChat(guestCtx.room, { from: 'guest', nickname: guestCtx.guest.nickname, text: msg.text });
     }
   });
 
   ws.on('close', () => {
     session.detach(ws);
-    console.log(`[ws] detach session=${session.name} clients=${session.clients.size}`);
+    if (guestCtx) {
+      const { room, guest } = guestCtx;
+      if (guest.ws === ws) guest.ws = null;
+      if (!room.closed) {
+        room.broadcast({ type: 'room-presence', guests: room.presence() });
+        roomSystemMsg(room, `${guest.nickname} 離開了聊天室`);
+      }
+    }
+    console.log(`[ws] detach session=${session.name} ${who} clients=${session.clients.size}`);
   });
 
   ws.on('error', (err) => {

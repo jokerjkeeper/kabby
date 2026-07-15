@@ -66,10 +66,11 @@ class Session extends EventEmitter {
 
   attach(ws) {
     this.clients.add(ws);
-    // Replay scrollback so the new client sees the current screen
-    const replay = this.scrollback.dump();
-    if (replay && ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify({ type: 'output', data: replay }));
+    if (ws.readyState === ws.OPEN) {
+      // 先告知目前 PTY 尺寸（訪客端要固定 resize 成這個大小才能正確渲染），再 replay scrollback
+      ws.send(JSON.stringify({ type: 'termsize', cols: this.cols, rows: this.rows }));
+      const replay = this.scrollback.dump();
+      if (replay) ws.send(JSON.stringify({ type: 'output', data: replay }));
     }
   }
 
@@ -110,6 +111,8 @@ class Session extends EventEmitter {
     this.cols = cols;
     this.rows = rows;
     try { this.proc.resize(cols, rows); } catch {}
+    // 通知所有 client 新尺寸（訪客端跟著 resize 自己的 xterm；host 端忽略此訊息）
+    this._broadcast({ type: 'termsize', cols, rows });
   }
 
   kill() {

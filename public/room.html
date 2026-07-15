@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>kabby 聊天室</title>
+  <link rel="stylesheet" href="https://unpkg.com/@xterm/xterm@5.5.0/css/xterm.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Top bar */
+    #topbar {
+      background: #2d2d2d;
+      border-bottom: 1px solid #333;
+      padding: 6px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 34px;
+      flex: 0 0 auto;
+    }
+    #topbar .room-name { font-weight: 600; color: #f0f0f0; }
+    #topbar .session-name { color: #888; font-size: 12px; }
+    .perm-badge {
+      border-radius: 10px;
+      padding: 1px 10px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .perm-badge.rw { background: #2d5a4a; color: #8fdca0; }
+    .perm-badge.ro { background: #5a4a1d; color: #ffd97a; }
+    #topbar .spacer { flex: 1; }
+    #topbar .me { color: #9cdcfe; font-size: 12px; }
+    #conn-dot { width: 8px; height: 8px; border-radius: 50%; background: #888; }
+    #conn-dot.on { background: #4caf50; }
+    #conn-dot.off { background: #f44336; }
+
+    /* Main: terminal + chat */
+    #layout { flex: 1; display: flex; min-height: 0; }
+    #term-side { flex: 1 1 auto; min-width: 0; position: relative; overflow: auto; background: #1e1e1e; padding: 4px; }
+    #term-side .xterm { height: auto; }
+
+    #chat-side {
+      flex: 0 0 300px;
+      border-left: 1px solid #333;
+      background: #252526;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    #chat-head {
+      padding: 8px 12px;
+      border-bottom: 1px solid #333;
+      color: #888;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #guest-count { color: #4ec9b0; }
+    #guest-list { padding: 4px 12px 8px; border-bottom: 1px solid #2a2a2a; display: flex; flex-wrap: wrap; gap: 6px; }
+    .guest-chip { background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 10px; padding: 1px 9px; font-size: 11px; color: #aaa; }
+    .guest-chip.online { color: #cdebdf; border-color: #2d5a4a; }
+    .guest-chip .dot { color: #4caf50; margin-right: 3px; }
+    .guest-chip.offline .dot { color: #666; }
+
+    #chat-msgs { flex: 1; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .msg { line-height: 1.45; word-break: break-word; }
+    .msg .who { font-weight: 600; margin-right: 6px; }
+    .msg.host .who { color: #4ec9b0; }
+    .msg.guest .who { color: #9cdcfe; }
+    .msg.me .who { color: #dcdcaa; }
+    .msg .ts { color: #666; font-size: 10px; margin-left: 6px; }
+    .msg.system { color: #888; font-size: 11px; font-style: italic; }
+
+    #chat-input-row { flex: 0 0 auto; display: flex; gap: 6px; padding: 8px; border-top: 1px solid #333; }
+    #chat-input {
+      flex: 1;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border: 1px solid #444;
+      border-radius: 3px;
+      padding: 6px 8px;
+      font-size: 13px;
+    }
+    .btn {
+      background: #0e639c; color: #fff; border: 0; border-radius: 3px;
+      padding: 6px 14px; font-size: 13px; cursor: pointer;
+    }
+    .btn:hover { background: #1177bb; }
+    .btn:disabled { background: #2a2a2a; color: #555; cursor: not-allowed; }
+
+    /* Join / closed overlay */
+    #overlay {
+      position: fixed; inset: 0; background: #1e1e1e; z-index: 100;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #overlay.hidden { display: none; }
+    .join-box {
+      background: #2d2d2d; border: 1px solid #444; border-radius: 6px;
+      padding: 24px 26px; width: 360px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .join-box h2 { font-size: 16px; margin-bottom: 4px; }
+    .join-box .sub { color: #888; font-size: 12px; margin-bottom: 14px; }
+    .join-box label { display: block; margin: 10px 0 4px; font-size: 12px; color: #aaa; }
+    .join-box input {
+      width: 100%; background: #1e1e1e; color: #d4d4d4;
+      border: 1px solid #444; border-radius: 3px; padding: 7px 9px; font-size: 13px;
+    }
+    .join-box .error { color: #f48771; font-size: 12px; margin-top: 10px; min-height: 15px; }
+    .join-box .actions { margin-top: 14px; display: flex; justify-content: flex-end; }
+    .join-box .closed-note { color: #ffd97a; font-size: 13px; line-height: 1.6; }
+
+    /* toast */
+    #toast-host { position: fixed; right: 16px; bottom: 16px; z-index: 300; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none; }
+    .toast {
+      background: #2d2d2d; border: 1px solid #444; border-left: 3px solid #888;
+      border-radius: 4px; padding: 10px 14px; font-size: 12px; color: #ddd;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5); max-width: 420px;
+      opacity: 1; transition: opacity 0.3s;
+    }
+    .toast.warn { border-left-color: #d7913a; color: #ffd9a8; background: #2e2620; }
+    .toast.out { opacity: 0; }
+
+    /* 窄螢幕：聊天欄疊到下方 */
+    @media (max-width: 720px) {
+      #layout { flex-direction: column; }
+      #chat-side { flex: 0 0 40%; border-left: 0; border-top: 1px solid #333; }
+    }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <span id="conn-dot"></span>
+    <span class="room-name" id="room-name">—</span>
+    <span class="session-name" id="session-name"></span>
+    <span class="perm-badge ro" id="perm-badge">唯讀</span>
+    <span class="spacer"></span>
+    <span class="me" id="me-nick"></span>
+    <button class="btn" id="leave-btn" style="background:#3c3c3c" title="離開聊天室（清掉本機入場券）">離開</button>
+  </div>
+
+  <div id="layout">
+    <div id="term-side"></div>
+    <aside id="chat-side">
+      <div id="chat-head"><span>聊天</span><span id="guest-count"></span></div>
+      <div id="guest-list"></div>
+      <div id="chat-msgs"></div>
+      <div id="chat-input-row">
+        <input id="chat-input" type="text" placeholder="輸入訊息…" maxlength="2000" autocomplete="off" />
+        <button class="btn" id="chat-send">送出</button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 入房表單 / 房間關閉提示 -->
+  <div id="overlay">
+    <div class="join-box" id="join-box">
+      <h2>進入 kabby 聊天室</h2>
+      <div class="sub">輸入房主給你的 key 與你的暱稱</div>
+      <label for="join-key">聊天室 key</label>
+      <input id="join-key" type="text" autocomplete="off" spellcheck="false" />
+      <label for="join-nick">暱稱</label>
+      <input id="join-nick" type="text" maxlength="24" autocomplete="off" />
+      <div class="error" id="join-error"></div>
+      <div class="actions"><button class="btn" id="join-submit">進入</button></div>
+    </div>
+  </div>
+
+  <div id="toast-host"></div>
+
+  <script src="https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+  <script src="/room.js"></script>
+</body>
+</html>

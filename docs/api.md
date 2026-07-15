@@ -211,6 +211,35 @@ Request body：
 
 ---
 
+## Rooms（聊天室）
+
+共享終端房間：房主建房綁一個 running session，訪客憑 key 入房看終端（可選開放輸入）+ 文字聊天。房間存記憶體，daemon 重啟 / 綁定 session 結束即關房。訪客頁：`/room.html`。
+
+### `POST /api/rooms/join`（**不需 token**，防爆破限流：同 IP 5 分鐘內錯 10 次 → 429）
+
+Request：`{ "key": "test1234", "nickname": "小明" }`
+Response：`{ "ticket": "...", "roomId": "...", "roomName": "...", "sessionId": "...", "sessionName": "...", "allowWrite": false, "nickname": "小明" }`
+
+ticket 是之後 WS 連線的憑證（`/ws/:sessionId?ticket=`），房間關閉或 daemon 重啟即失效。
+
+### `GET /api/rooms`（token）
+
+列所有房間，含 `guests: [{ nickname, joinedAt, online }]`。
+
+### `POST /api/rooms`（token)
+
+`{ "sessionId": "<id|name>", "name?": "...", "key?": "至少4字元，留空自動產生", "allowWrite?": false }` → `201` 房間 JSON。session 必須存在且 alive。
+
+### `PATCH /api/rooms/:id`（token）
+
+`{ "allowWrite": true|false }` — 即時生效，訪客收到 `room-config` 推送。
+
+### `DELETE /api/rooms/:id`（token）
+
+關房：所有訪客收到 `room-closed` 後被斷開，tickets 回收。
+
+---
+
 ## WebSocket
 
 ### `ws://localhost:3700/ws/:id`（HTTPS 下用 `wss://`）
@@ -223,12 +252,15 @@ Request body：
 2. 加入 session 的 `clients` set，之後 PTY 任何輸出都會收到
 3. 該 client 可發 `input` / `resize` 訊息影響 PTY
 
+**認證**：`?token=`（房主，完整權限）或 `?ticket=`（聊天室訪客，僅限該房綁定的 session）。訪客連線受房間權限管制：`input` 只在房間 `allowWrite=true` 時生效（伺服器端強制），`resize` 一律忽略。
+
 ### Client → Server 訊息
 
 | `type` | 欄位 | 行為 |
 |---|---|---|
-| `input` | `data: string` | 寫進 PTY |
-| `resize` | `cols: number, rows: number` | resize PTY（latest-resize-wins，多 client 互覆蓋） |
+| `input` | `data: string` | 寫進 PTY（訪客受 `allowWrite` 管制） |
+| `resize` | `cols: number, rows: number` | resize PTY（latest-resize-wins，多 client 互覆蓋；訪客忽略） |
+| `chat` | `text: string` | （訪客連線）發聊天訊息，廣播全房 |
 
 非 JSON 或未知 type 一律忽略。
 
@@ -237,14 +269,25 @@ Request body：
 | `type` | 欄位 | 時機 |
 |---|---|---|
 | `output` | `data: string` | PTY 任何輸出 / 新 client 連上時的 scrollback replay |
+| `termsize` | `cols, rows` | attach 時 + 每次 PTY resize（訪客端跟著 `term.resize`；host 端忽略） |
 | `exit` | `code: number, signal: string\|null` | PTY 進程結束 |
+| `blocked` | `words: string[]` | 輸入含敏感詞被攔截 |
+| `room-init` | `room, nickname, chatLog, guests` | （訪客）連上時的房間狀態 + 聊天歷史 |
+| `chat` | `from, nickname, text, ts` | 房內聊天訊息（`from: host\|guest\|system`） |
+| `room-presence` | `guests: [...]` | 訪客加入 / 離開 |
+| `room-config` | `allowWrite: boolean` | 房主切換輸入權限 |
+| `room-closed` | `reason` | 房間關閉（`host-closed` / `session-exit`） |
+
+### `ws://localhost:3700/ws/room/:roomId`（token）
+
+房主聊天面板專用（chat-only，不串終端）。連上先收 `room-init`（含 `chatLog`），之後收發 `chat`、收 `room-presence` / `room-closed`。
 
 ### 錯誤狀態
 
 | HTTP 升級回應 | 原因 |
 |---|---|
-| `404 Not Found` | URL pattern 不是 `/ws/:id` 或 session 不存在 |
-| `401 Unauthorized` | 有設 `AUTH_TOKEN` 但 `?token=` 不符 |
+| `404 Not Found` | URL pattern 不是 `/ws/:id` 或 session / 房間不存在 |
+| `401 Unauthorized` | token 不符，且沒有有效的訪客 ticket |
 
 ---
 

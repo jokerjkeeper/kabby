@@ -1431,6 +1431,282 @@
   loginTokenEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLogin(); });
 
   // ──────────────────────────────────────────────────────────────────────
+  // 聊天室（房主面板）— 建房綁 session、key 分享、聊天、訪客權限開關
+  // 訪客端在 /room.html（key + 暱稱入房）；這裡是房主管理視角
+  // ──────────────────────────────────────────────────────────────────────
+  let rooms = [];
+  let selectedRoomId = null;
+  let roomWs = null;              // 選中房間的聊天 WS（/ws/room/:id）
+  let roomPollTimer = null;
+
+  const roomBtn = document.getElementById('room-btn');
+  const roomListEl = document.getElementById('room-list');
+  const roomChatTitleEl = document.getElementById('room-chat-title');
+  const roomChatConnEl = document.getElementById('room-chat-conn');
+  const roomChatMsgsEl = document.getElementById('room-chat-msgs');
+  const roomChatInputEl = document.getElementById('room-chat-input');
+  const roomChatSendBtn = document.getElementById('room-chat-send');
+  const roomModal = document.getElementById('room-modal');
+
+  // http（非 https）下 navigator.clipboard 不可用 → textarea + execCommand fallback
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+    }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;left:-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return Promise.resolve(ok);
+    } catch { return Promise.resolve(false); }
+  }
+
+  function guestLink(room) {
+    return location.origin + '/room.html?key=' + encodeURIComponent(room.key);
+  }
+
+  function setRoomPanel(open) {
+    document.body.classList.toggle('room-open', open);
+    roomBtn.classList.toggle('on', open);
+    try { localStorage.setItem('kabby-room-panel', open ? '1' : '0'); } catch {}
+    const t = activeTab();
+    if (t) fitTab(t);   // 第三欄出現/消失 → 終端 refit
+    if (open) {
+      refreshRooms();
+      if (!roomPollTimer) roomPollTimer = setInterval(refreshRooms, 5000);
+    } else if (roomPollTimer) {
+      clearInterval(roomPollTimer);
+      roomPollTimer = null;
+    }
+  }
+
+  async function refreshRooms() {
+    if (locked) return;
+    let list;
+    try { list = await apiFetch('/api/rooms').then((r) => r.json()); }
+    catch { return; }
+    rooms = Array.isArray(list) ? list : [];
+    if (selectedRoomId && !rooms.some((r) => r.id === selectedRoomId)) {
+      // 選中的房沒了（被關）→ 收掉聊天
+      roomChatDisconnect();
+      selectedRoomId = null;
+      roomChatTitleEl.textContent = '未選擇房間';
+      roomChatMsgsEl.innerHTML = '';
+    }
+    renderRooms();
+  }
+
+  function renderRooms() {
+    if (!rooms.length) {
+      roomListEl.innerHTML = '<div class="room-empty">尚無聊天室。點「＋ 建房」綁定一個運行中 session。<br>訪客入口：<code>/room.html</code></div>';
+      return;
+    }
+    roomListEl.innerHTML = '';
+    for (const room of rooms) {
+      const card = document.createElement('div');
+      card.className = 'room-card' + (room.id === selectedRoomId ? ' selected' : '');
+      const online = room.guests.filter((g) => g.online).length;
+      card.innerHTML = `
+        <div class="rc-name">
+          <span>${escapeHtml(room.name)}</span>
+          <span class="badge">${online}/${room.guests.length} 在線</span>
+          ${room.allowWrite ? '<span class="badge warn">可寫</span>' : ''}
+        </div>
+        <div class="rc-meta">綁定：${escapeHtml(room.sessionName || room.sessionId.slice(0, 8))}</div>
+        <div class="rc-meta">key: <span class="rc-key">${escapeHtml(room.key)}</span></div>
+        <div class="rc-guests">${room.guests.map((g) =>
+          `<span class="rc-guest-chip ${g.online ? 'online' : ''}">${escapeHtml(g.nickname)}</span>`).join('') || '<span style="color:#666;font-size:10px">還沒有訪客</span>'}</div>
+        <div class="rc-actions">
+          <button class="btn tiny" data-action="copy-link" title="複製訪客入房連結（含 key）">複製連結</button>
+          <label class="rc-write-toggle" title="訪客可否在終端輸入（即時生效，伺服器端強制）">
+            <input type="checkbox" data-action="allow-write" ${room.allowWrite ? 'checked' : ''} /> 可輸入
+          </label>
+          <button class="btn danger tiny" data-action="close-room" style="margin-left:auto">關房</button>
+        </div>
+      `;
+      card.addEventListener('click', () => selectRoom(room.id));
+      card.querySelector('[data-action="copy-link"]').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const ok = await copyText(guestLink(room));
+        showToast(ok ? '已複製訪客連結：' + guestLink(room) : '複製失敗，連結：' + guestLink(room), ok ? '' : 'warn');
+      });
+      const writeToggle = card.querySelector('[data-action="allow-write"]');
+      writeToggle.addEventListener('click', (e) => e.stopPropagation());
+      writeToggle.addEventListener('change', async (e) => {
+        e.stopPropagation();
+        const want = writeToggle.checked;
+        if (want && !confirm('開放訪客輸入 = 訪客能在這台機器的終端執行任意指令（用你的權限）。確定開放？')) {
+          writeToggle.checked = false;
+          return;
+        }
+        try {
+          await apiFetch('/api/rooms/' + encodeURIComponent(room.id), {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ allowWrite: want }),
+          });
+          refreshRooms();
+        } catch { writeToggle.checked = !want; }
+      });
+      card.querySelector('[data-action="close-room"]').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm(`關閉聊天室「${room.name}」？所有訪客會被斷開。（session 本身不受影響）`)) return;
+        try { await apiFetch('/api/rooms/' + encodeURIComponent(room.id), { method: 'DELETE' }); } catch {}
+        refreshRooms();
+      });
+      roomListEl.appendChild(card);
+    }
+  }
+
+  function selectRoom(id) {
+    if (selectedRoomId === id) return;
+    selectedRoomId = id;
+    renderRooms();
+    roomChatConnect(id);
+  }
+
+  function roomChatDisconnect() {
+    if (roomWs) { try { roomWs.close(); } catch {} roomWs = null; }
+    roomChatInputEl.disabled = true;
+    roomChatSendBtn.disabled = true;
+    roomChatConnEl.textContent = '';
+  }
+
+  function roomChatConnect(roomId) {
+    roomChatDisconnect();
+    const room = rooms.find((r) => r.id === roomId);
+    roomChatTitleEl.textContent = room ? room.name : '聊天';
+    roomChatMsgsEl.innerHTML = '<div class="msg system">連線中…</div>';
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let url = `${proto}//${location.host}/ws/room/${encodeURIComponent(roomId)}`;
+    if (authToken) url += '?token=' + encodeURIComponent(authToken);
+    const ws = new WebSocket(url);
+    roomWs = ws;
+    ws.onopen = () => {
+      roomChatConnEl.textContent = '● 已連線';
+      roomChatConnEl.style.color = '#4caf50';
+      roomChatInputEl.disabled = false;
+      roomChatSendBtn.disabled = false;
+    };
+    ws.onmessage = (event) => {
+      let msg;
+      try { msg = JSON.parse(event.data); } catch { return; }
+      if (msg.type === 'room-init') {
+        roomChatMsgsEl.innerHTML = '';
+        for (const m of msg.chatLog || []) roomAppendChat(m);
+      } else if (msg.type === 'chat') {
+        roomAppendChat(msg);
+      } else if (msg.type === 'room-presence') {
+        // 在線名單變動 → 更新該房卡片（rooms 快取就地改，不打 API）
+        const r = rooms.find((x) => x.id === roomId);
+        if (r) { r.guests = msg.guests || []; renderRooms(); }
+      } else if (msg.type === 'room-closed') {
+        roomAppendChat({ from: 'system', text: '房間已關閉' });
+        refreshRooms();
+      }
+    };
+    ws.onclose = () => {
+      if (roomWs === ws) {
+        roomChatConnEl.textContent = '○ 已斷線';
+        roomChatConnEl.style.color = '#f44336';
+        roomChatInputEl.disabled = true;
+        roomChatSendBtn.disabled = true;
+      }
+    };
+    ws.onerror = () => { try { ws.close(); } catch {} };
+  }
+
+  function roomAppendChat(m) {
+    const el = document.createElement('div');
+    if (m.from === 'system') {
+      el.className = 'msg system';
+      el.textContent = m.text;
+    } else {
+      el.className = 'msg ' + (m.from === 'host' ? 'host' : 'guest');
+      const ts = m.ts ? new Date(m.ts).toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute: '2-digit' }) : '';
+      el.innerHTML = `<span class="who">${escapeHtml(m.from === 'host' ? '房主' : m.nickname || '訪客')}</span>`
+        + `${escapeHtml(m.text)}<span class="ts">${ts}</span>`;
+    }
+    roomChatMsgsEl.appendChild(el);
+    roomChatMsgsEl.scrollTop = roomChatMsgsEl.scrollHeight;
+  }
+
+  function roomSendChat() {
+    const text = roomChatInputEl.value.trim();
+    if (!text || !roomWs || roomWs.readyState !== WebSocket.OPEN) return;
+    roomWs.send(JSON.stringify({ type: 'chat', text }));
+    roomChatInputEl.value = '';
+  }
+
+  // ── 建房 modal ──
+  const rm = {
+    modal: roomModal,
+    session: document.getElementById('rm-session'),
+    name: document.getElementById('rm-name'),
+    key: document.getElementById('rm-key'),
+    allowWrite: document.getElementById('rm-allow-write'),
+    err: document.getElementById('rm-error'),
+    submit: document.getElementById('rm-submit'),
+  };
+  async function rmOpen() {
+    const sessions = (await fetchSessions()) || [];
+    const alive = sessions.filter((s) => s.alive);
+    if (!alive.length) { showToast('沒有運行中的 session，先開一個再建房', 'warn'); return; }
+    rm.session.innerHTML = alive.map((s) =>
+      `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}（${escapeHtml(shorten(s.cwd, 30))}）</option>`).join('');
+    rm.name.value = '';
+    rm.key.value = '';
+    rm.allowWrite.checked = false;
+    rm.err.textContent = '';
+    rm.modal.classList.add('visible');
+    setTimeout(() => rm.key.focus(), 50);
+  }
+  function rmClose() { rm.modal.classList.remove('visible'); }
+  async function rmSubmit() {
+    const sessionId = rm.session.value;
+    if (!sessionId) { rm.err.textContent = '請選擇 session'; return; }
+    const body = { sessionId, allowWrite: rm.allowWrite.checked };
+    if (rm.name.value.trim()) body.name = rm.name.value.trim();
+    if (rm.key.value.trim()) body.key = rm.key.value.trim();
+    if (body.allowWrite && !confirm('開放訪客輸入 = 訪客能在這台機器的終端執行任意指令（用你的權限）。確定？')) return;
+    rm.submit.disabled = true; rm.err.textContent = '';
+    try {
+      const res = await apiFetch('/api/rooms', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || ('HTTP ' + res.status));
+      rmClose();
+      await refreshRooms();
+      selectRoom(json.id);
+      const ok = await copyText(guestLink(json));
+      showToast((ok ? '房間已建立，訪客連結已複製：' : '房間已建立，訪客連結：') + guestLink(json));
+    } catch (err) { rm.err.textContent = err.message; }
+    finally { rm.submit.disabled = false; }
+  }
+
+  roomBtn.addEventListener('click', () => setRoomPanel(!document.body.classList.contains('room-open')));
+  document.getElementById('room-hide-btn').addEventListener('click', () => setRoomPanel(false));
+  document.getElementById('room-new-btn').addEventListener('click', rmOpen);
+  document.getElementById('rm-cancel').addEventListener('click', rmClose);
+  rm.submit.addEventListener('click', rmSubmit);
+  roomChatSendBtn.addEventListener('click', roomSendChat);
+  roomChatInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') roomSendChat(); });
+  roomModal.addEventListener('click', (e) => { if (e.target === roomModal) rmClose(); });
+  document.addEventListener('keydown', (e) => {
+    if (!roomModal.classList.contains('visible')) return;
+    if (e.key === 'Escape') rmClose();
+    else if (e.key === 'Enter') rmSubmit();
+  });
+  try { if (localStorage.getItem('kabby-room-panel') === '1') setRoomPanel(true); } catch {}
+
+  // ──────────────────────────────────────────────────────────────────────
   // 監控頁（唯讀 pull：讀 /api/usage + /api/usage/sensitive；背景 watcher 維護索引）
   // ──────────────────────────────────────────────────────────────────────
   const monModal = document.getElementById('monitor-modal');
