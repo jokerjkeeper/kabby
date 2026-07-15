@@ -67,20 +67,27 @@
     }
     #frozen-hint.visible { display: block; }
 
-    /* 乾淨版對話記錄（覆蓋終端區的抽屜面板，獨立捲動） */
+    /* 乾淨版對話記錄 — 獨立大 modal（不在終端區內，捲動互不干擾） */
     #convo-panel {
-      position: absolute; inset: 0; z-index: 30;
-      background: #1e1e1e; display: none; flex-direction: column;
+      position: fixed; inset: 0; z-index: 150;
+      background: rgba(0,0,0,0.6);
+      display: none; align-items: center; justify-content: center;
     }
     #convo-panel.visible { display: flex; }
+    #convo-box {
+      width: min(960px, 94vw); height: 88vh;
+      background: #1e1e1e; border: 1px solid #444; border-radius: 8px;
+      display: flex; flex-direction: column; overflow: hidden;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+    }
     #convo-head {
       flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
-      padding: 8px 14px; background: #252526; border-bottom: 1px solid #333;
+      padding: 10px 16px; background: #252526; border-bottom: 1px solid #333;
     }
     #convo-head .t { font-weight: 600; color: #f0f0f0; }
     #convo-head .sub { color: #777; font-size: 11px; }
     #convo-head .spacer { flex: 1; }
-    #convo-body { flex: 1; overflow-y: auto; padding: 10px 16px; }
+    #convo-body { flex: 1; overflow-y: auto; padding: 12px 18px; }
     .cv-turn { margin-bottom: 12px; max-width: 860px; }
     .cv-role {
       font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
@@ -97,6 +104,32 @@
       padding: 8px 12px;
     }
     .cv-turn.user .cv-text { background: #1d2b26; border-color: #2d4a3e; }
+    /* Markdown 渲染版（助理訊息） */
+    .cv-text.md { white-space: normal; }
+    .cv-text.md p { margin: 0 0 8px; }
+    .cv-text.md p:last-child { margin-bottom: 0; }
+    .cv-text.md code {
+      background: #1a1a1a; border: 1px solid #333; border-radius: 3px;
+      padding: 0 5px; font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; color: #dcdcaa;
+    }
+    .cv-text.md pre.md-code {
+      background: #161616; border: 1px solid #333; border-radius: 5px;
+      padding: 10px 12px; margin: 8px 0; overflow-x: auto;
+      font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; line-height: 1.5;
+      white-space: pre; color: #ce9178;
+    }
+    .cv-text.md .md-h { font-weight: 700; color: #f0f0f0; margin: 12px 0 6px; }
+    .cv-text.md .md-h1 { font-size: 17px; } .cv-text.md .md-h2 { font-size: 15px; }
+    .cv-text.md .md-h3 { font-size: 14px; } .cv-text.md .md-h4 { font-size: 13px; }
+    .cv-text.md .md-list { margin: 6px 0 8px; padding-left: 22px; }
+    .cv-text.md .md-list li { margin: 3px 0; }
+    .cv-text.md .md-bq {
+      border-left: 3px solid #4ec9b0; background: #212826;
+      padding: 4px 10px; margin: 6px 0; color: #b8ccc6;
+    }
+    .cv-text.md hr.md-hr { border: 0; border-top: 1px solid #3a3a3a; margin: 10px 0; }
+    .cv-text.md strong { color: #f0f0f0; }
+    .cv-text.md a { color: #4ec9b0; }
     .cv-empty { color: #777; text-align: center; padding: 40px 20px; line-height: 1.8; }
     #convo-btn.on { background: #2d5a4a; color: #cdebdf; }
 
@@ -242,16 +275,6 @@
     <div id="term-side">
       <div id="frozen-hint">⏸ 自己畫面 — 已定格，房主那邊的新輸出暫存中</div>
       <button id="scroll-latest">↓ 回房主畫面</button>
-      <div id="convo-panel">
-        <div id="convo-head">
-          <span class="t">📜 對話記錄</span>
-          <span class="sub" id="convo-status"></span>
-          <span class="spacer"></span>
-          <button class="btn" id="convo-refresh" style="background:#3c3c3c; padding:4px 12px">刷新</button>
-          <button class="btn" id="convo-close" style="background:#3c3c3c; padding:4px 12px">× 關閉</button>
-        </div>
-        <div id="convo-body"></div>
-      </div>
     </div>
     <aside id="chat-side">
       <div id="chat-resize" title="拖曳調整聊天欄寬度"></div>
@@ -266,6 +289,20 @@
         <input type="file" id="chat-file" accept="image/*" style="display:none" />
       </div>
     </aside>
+  </div>
+
+  <!-- 乾淨版對話記錄（獨立大 modal） -->
+  <div id="convo-panel">
+    <div id="convo-box">
+      <div id="convo-head">
+        <span class="t">📜 對話記錄</span>
+        <span class="sub" id="convo-status"></span>
+        <span class="spacer"></span>
+        <button class="btn" id="convo-refresh" style="background:#3c3c3c; padding:4px 12px">刷新</button>
+        <button class="btn" id="convo-close" style="background:#3c3c3c; padding:4px 12px">× 關閉</button>
+      </div>
+      <div id="convo-body"></div>
+    </div>
   </div>
 
   <!-- 聊天貼圖放大檢視 -->

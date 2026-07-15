@@ -299,6 +299,56 @@
     try { return new Date(ts).toLocaleString('zh-TW', { hour12: false }); } catch { return ''; }
   }
 
+  // 輕量 Markdown 渲染（助理訊息用）。先整段 escapeHtml 再轉換 → 無 HTML 注入疑慮。
+  // 支援：```圍欄程式碼、`行內碼`、**粗體**、# 標題、-/數字清單、> 引用、--- 分隔線、連結
+  function mdInline(s) {   // s 已 escape
+    return s
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  }
+  function mdBlock(raw) {
+    const lines = escapeHtml(raw).split('\n');
+    const html = [];
+    let list = null;   // 'ul' | 'ol'
+    let para = [];
+    const closeList = () => { if (list) { html.push(`</${list}>`); list = null; } };
+    const flushPara = () => {
+      if (para.length) { html.push('<p>' + para.map(mdInline).join('<br>') + '</p>'); para = []; }
+    };
+    for (const line of lines) {
+      if (/^\s*$/.test(line)) { flushPara(); closeList(); continue; }
+      const h = line.match(/^(#{1,4})\s+(.*)$/);
+      if (h) { flushPara(); closeList(); html.push(`<div class="md-h md-h${h[1].length}">${mdInline(h[2])}</div>`); continue; }
+      if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { flushPara(); closeList(); html.push('<hr class="md-hr">'); continue; }
+      const ul = line.match(/^\s*[-*]\s+(.*)$/);
+      const ol = line.match(/^\s*\d+[.、)]\s+(.*)$/);
+      if (ul || ol) {
+        flushPara();
+        const want = ul ? 'ul' : 'ol';
+        if (list !== want) { closeList(); html.push(`<${want} class="md-list">`); list = want; }
+        html.push('<li>' + mdInline((ul || ol)[1]) + '</li>');
+        continue;
+      }
+      const bq = line.match(/^\s*&gt;\s?(.*)$/);   // 已 escape，'>' 是 &gt;
+      if (bq) { flushPara(); closeList(); html.push(`<div class="md-bq">${mdInline(bq[1])}</div>`); continue; }
+      closeList();
+      para.push(line);
+    }
+    flushPara(); closeList();
+    return html.join('');
+  }
+  function renderMarkdown(src) {
+    const parts = String(src).split(/```/);   // 奇數段 = 圍欄程式碼
+    return parts.map((part, i) => {
+      if (i % 2 === 0) return mdBlock(part);
+      let code = part;
+      const nl = code.indexOf('\n');
+      if (nl >= 0 && /^[\w+#.-]*\s*$/.test(code.slice(0, nl))) code = code.slice(nl + 1);   // 去掉語言標記行
+      return `<pre class="md-code">${escapeHtml(code.replace(/\n$/, ''))}</pre>`;
+    }).join('');
+  }
+
   async function convoRefresh() {
     if (!joinInfo) return;
     convoStatus.textContent = '載入中…';
@@ -311,7 +361,8 @@
       convoStatus.textContent = '載入失敗：' + err.message;
       return;
     }
-    const turns = data.turns || [];
+    // 過濾空白輪次（純工具呼叫、沒有文字的 assistant 輪）
+    const turns = (data.turns || []).filter((t) => t.text && t.text.trim());
     // 刷新前貼底 → 刷新後跟著貼底；使用者捲上去看舊的 → 保持位置不打擾
     const stick = convoBody.scrollTop + convoBody.clientHeight >= convoBody.scrollHeight - 30;
     if (!turns.length) {
@@ -324,9 +375,13 @@
     }
     convoBody.innerHTML = turns.map((t) => {
       const model = t.model ? `<span class="cv-model">${escapeHtml(t.model)}</span>` : '';
+      // 助理訊息 Markdown 渲染；使用者訊息保持原文（pre-wrap）
+      const body = t.role === 'assistant'
+        ? `<div class="cv-text md">${renderMarkdown(t.text)}</div>`
+        : `<div class="cv-text">${escapeHtml(t.text)}</div>`;
       return `<div class="cv-turn ${escapeHtml(t.role)}">
         <div class="cv-role"><span>${t.role === 'user' ? '👤 USER' : '🤖 ASSISTANT'}</span>${model}<span class="cv-ts">${convoFmtTs(t.ts)}</span></div>
-        <div class="cv-text">${escapeHtml(t.text)}</div>
+        ${body}
       </div>`;
     }).join('');
     convoStatus.textContent = `${turns.length} 則 · 自動刷新中`;
@@ -348,6 +403,10 @@
   convoBtn.addEventListener('click', () => setConvoOpen(!convoPanel.classList.contains('visible')));
   document.getElementById('convo-close').addEventListener('click', () => setConvoOpen(false));
   document.getElementById('convo-refresh').addEventListener('click', convoRefresh);
+  convoPanel.addEventListener('click', (e) => { if (e.target === convoPanel) setConvoOpen(false); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && convoPanel.classList.contains('visible')) setConvoOpen(false);
+  });
 
   function setAllowWrite(v, silent) {
     allowWrite = !!v;
