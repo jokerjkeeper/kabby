@@ -102,7 +102,37 @@ app.post('/api/rooms/join', (req, res) => {
   });
 });
 
-// 其餘 /api/* 一律要 token（health / rooms/join 已在上面先處理，不受影響）
+// 訪客看綁定 session 的「乾淨版對話記錄」（ticket 認證，同樣在 token middleware 之前）。
+// 從 provider 的對話 JSONL 讀（跟監控頁同一套採集器），不受終端 TUI 重繪雜訊影響。
+app.get('/api/rooms/guest/conversation', async (req, res) => {
+  const resolved = roomRegistry.resolveTicket(req.query.ticket || '');
+  if (!resolved) return res.status(401).json({ error: 'ticket 無效或房間已關閉' });
+  const session = registry.get(resolved.room.sessionId);
+  if (!session) return res.status(404).json({ error: 'session 已結束' });
+  const provider = providers.getProvider(session.provider);
+  if (!provider.historySupported) {
+    return res.json({ turns: [], unsupported: true, provider: provider.id });
+  }
+  try {
+    // 定位這個 PTY 對應的對話 JSONL：resume 的直接用該 id；
+    // 否則取該 cwd 下「PTY 啟動後仍有更新」的最新一份（cc 啟動即建檔、活躍中 mtime 持續前進）
+    let ccSessionId = session.resumeSessionId;
+    if (!ccSessionId) {
+      const items = await history.listHistory(provider.id, session.cwd);
+      const started = new Date(session.createdAt).getTime();
+      const hit = items.find((h) => h.mtime >= started);
+      ccSessionId = hit ? hit.sessionId : null;
+    }
+    if (!ccSessionId) return res.json({ turns: [], notFound: true });
+    const convo = await collectorFor(provider.id).readConversation(ccSessionId);
+    if (!convo) return res.json({ turns: [], notFound: true });
+    res.json({ turns: convo.turns || [] });   // 不回 file 等本機路徑資訊
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 其餘 /api/* 一律要 token（health / rooms/join / rooms/guest/* 已在上面先處理，不受影響）
 app.use('/api', (req, res, next) => {
   if (tokenOk(req)) return next();
   res.status(401).json({ error: 'unauthorized' });

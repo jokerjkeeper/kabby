@@ -222,6 +222,11 @@ Response：`{ "ticket": "...", "roomId": "...", "roomName": "...", "sessionId": 
 
 ticket 是之後 WS 連線的憑證（`/ws/:sessionId?ticket=`），房間關閉或 daemon 重啟即失效。
 
+### `GET /api/rooms/guest/conversation?ticket=`（**ticket 認證**，不需 token）
+
+訪客看綁定 session 的乾淨版對話記錄（讀 provider 對話 JSONL，跟監控頁同一套採集器）。回 `{ turns: [{ ts, role, text, model?, tokens? }] }`；找不到存檔回 `{ turns: [], notFound: true }`。不回傳 `file` 等本機路徑。
+定位規則：resume 的 session 直接用該對話 id；新 session 取該 cwd 下「PTY 啟動後仍有更新」的最新一份（若同 cwd 另有 kabby 之外的活躍 cc，可能對應錯，屬已知限制）。
+
 ### `GET /api/rooms`（token）
 
 列所有房間，含 `guests: [{ nickname, joinedAt, online }]`。

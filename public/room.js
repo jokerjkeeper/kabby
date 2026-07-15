@@ -287,6 +287,68 @@
     else if (term) { term.scrollToBottom(); updateScrollIndicator(); }
   });
 
+  // ── 乾淨版對話記錄（讀對話存檔，獨立捲動，8 秒自動刷新）──
+  const convoBtn = document.getElementById('convo-btn');
+  const convoPanel = document.getElementById('convo-panel');
+  const convoBody = document.getElementById('convo-body');
+  const convoStatus = document.getElementById('convo-status');
+  let convoTimer = null;
+
+  function convoFmtTs(ts) {
+    if (!ts) return '';
+    try { return new Date(ts).toLocaleString('zh-TW', { hour12: false }); } catch { return ''; }
+  }
+
+  async function convoRefresh() {
+    if (!joinInfo) return;
+    convoStatus.textContent = '載入中…';
+    let data;
+    try {
+      const res = await fetch('/api/rooms/guest/conversation?ticket=' + encodeURIComponent(joinInfo.ticket));
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    } catch (err) {
+      convoStatus.textContent = '載入失敗：' + err.message;
+      return;
+    }
+    const turns = data.turns || [];
+    // 刷新前貼底 → 刷新後跟著貼底；使用者捲上去看舊的 → 保持位置不打擾
+    const stick = convoBody.scrollTop + convoBody.clientHeight >= convoBody.scrollHeight - 30;
+    if (!turns.length) {
+      convoBody.innerHTML = `<div class="cv-empty">${
+        data.unsupported ? '這個 provider 尚未支援對話記錄。'
+        : data.notFound ? '還沒找到這個 session 的對話存檔。<br>對話開始後（第一則訊息送出後）再按「刷新」。'
+        : '目前沒有對話內容。'}</div>`;
+      convoStatus.textContent = '';
+      return;
+    }
+    convoBody.innerHTML = turns.map((t) => {
+      const model = t.model ? `<span class="cv-model">${escapeHtml(t.model)}</span>` : '';
+      return `<div class="cv-turn ${escapeHtml(t.role)}">
+        <div class="cv-role"><span>${t.role === 'user' ? '👤 USER' : '🤖 ASSISTANT'}</span>${model}<span class="cv-ts">${convoFmtTs(t.ts)}</span></div>
+        <div class="cv-text">${escapeHtml(t.text)}</div>
+      </div>`;
+    }).join('');
+    convoStatus.textContent = `${turns.length} 則 · 自動刷新中`;
+    if (stick) convoBody.scrollTop = convoBody.scrollHeight;
+  }
+
+  function setConvoOpen(open) {
+    convoPanel.classList.toggle('visible', open);
+    convoBtn.classList.toggle('on', open);
+    if (open) {
+      convoBody.innerHTML = '';
+      convoRefresh().then(() => { convoBody.scrollTop = convoBody.scrollHeight; });
+      if (!convoTimer) convoTimer = setInterval(convoRefresh, 8000);
+    } else if (convoTimer) {
+      clearInterval(convoTimer);
+      convoTimer = null;
+    }
+  }
+  convoBtn.addEventListener('click', () => setConvoOpen(!convoPanel.classList.contains('visible')));
+  document.getElementById('convo-close').addEventListener('click', () => setConvoOpen(false));
+  document.getElementById('convo-refresh').addEventListener('click', convoRefresh);
+
   function setAllowWrite(v, silent) {
     allowWrite = !!v;
     permBadge.className = 'perm-badge ' + (allowWrite ? 'rw' : 'ro');
@@ -375,6 +437,7 @@
         break;
       case 'room-closed':
         closedByServer = true;
+        setConvoOpen(false);
         try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
         showJoinForm(msg.reason === 'session-exit'
           ? '綁定的 session 已結束，聊天室已關閉。'

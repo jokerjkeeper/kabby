@@ -67,6 +67,39 @@
     }
     #frozen-hint.visible { display: block; }
 
+    /* 乾淨版對話記錄（覆蓋終端區的抽屜面板，獨立捲動） */
+    #convo-panel {
+      position: absolute; inset: 0; z-index: 30;
+      background: #1e1e1e; display: none; flex-direction: column;
+    }
+    #convo-panel.visible { display: flex; }
+    #convo-head {
+      flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+      padding: 8px 14px; background: #252526; border-bottom: 1px solid #333;
+    }
+    #convo-head .t { font-weight: 600; color: #f0f0f0; }
+    #convo-head .sub { color: #777; font-size: 11px; }
+    #convo-head .spacer { flex: 1; }
+    #convo-body { flex: 1; overflow-y: auto; padding: 10px 16px; }
+    .cv-turn { margin-bottom: 12px; max-width: 860px; }
+    .cv-role {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+      color: #888; margin-bottom: 3px; display: flex; gap: 8px; align-items: baseline;
+    }
+    .cv-turn.user .cv-role { color: #4ec9b0; }
+    .cv-turn.assistant .cv-role { color: #9cdcfe; }
+    .cv-role .cv-ts { color: #666; text-transform: none; letter-spacing: 0; }
+    .cv-role .cv-model { color: #666; text-transform: none; letter-spacing: 0; }
+    .cv-text {
+      white-space: pre-wrap; word-break: break-word; line-height: 1.55;
+      color: #d4d4d4; font-size: 13px;
+      background: #232324; border: 1px solid #2c2c2c; border-radius: 6px;
+      padding: 8px 12px;
+    }
+    .cv-turn.user .cv-text { background: #1d2b26; border-color: #2d4a3e; }
+    .cv-empty { color: #777; text-align: center; padding: 40px 20px; line-height: 1.8; }
+    #convo-btn.on { background: #2d5a4a; color: #cdebdf; }
+
     #chat-side {
       flex: 0 0 var(--chat-w, 300px);
       border-left: 1px solid #333;
@@ -200,6 +233,7 @@
     <span class="perm-badge ro" id="perm-badge">唯讀</span>
     <span class="spacer"></span>
     <span class="me" id="me-nick"></span>
+    <button class="btn" id="convo-btn" style="background:#3c3c3c" title="乾淨排版的完整對話記錄（讀對話存檔，不受終端重繪影響，獨立捲動）">📜 對話記錄</button>
     <button class="btn" id="pause-btn" style="background:#3c3c3c" title="切到自己畫面：定格終端慢慢看，不被房主的輸出/捲動打擾；聊天不受影響">⏸ 看自己畫面</button>
     <button class="btn" id="leave-btn" style="background:#3c3c3c" title="離開聊天室（清掉本機入場券）">離開</button>
   </div>
@@ -208,6 +242,16 @@
     <div id="term-side">
       <div id="frozen-hint">⏸ 自己畫面 — 已定格，房主那邊的新輸出暫存中</div>
       <button id="scroll-latest">↓ 回房主畫面</button>
+      <div id="convo-panel">
+        <div id="convo-head">
+          <span class="t">📜 對話記錄</span>
+          <span class="sub" id="convo-status"></span>
+          <span class="spacer"></span>
+          <button class="btn" id="convo-refresh" style="background:#3c3c3c; padding:4px 12px">刷新</button>
+          <button class="btn" id="convo-close" style="background:#3c3c3c; padding:4px 12px">× 關閉</button>
+        </div>
+        <div id="convo-body"></div>
+      </div>
     </div>
     <aside id="chat-side">
       <div id="chat-resize" title="拖曳調整聊天欄寬度"></div>
