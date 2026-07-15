@@ -5,6 +5,7 @@ const { randomUUID, randomBytes } = require('crypto');
 // 訪客斷線（刷新頁面）ticket 仍有效，可重連；房間關閉或 daemon 重啟才失效。
 
 const CHAT_LOG_MAX = 200;   // 每房保留的聊天訊息數（新訪客進房 replay 用）
+const CHAT_IMG_KEEP = 20;   // 圖片訊息只保留最近 N 張（base64 存記憶體，控上限），舊的退化成佔位
 const KEY_MIN_LEN = 4;
 
 function genKey() {
@@ -30,6 +31,15 @@ class Room {
     this.chatLog.push(entry);
     if (this.chatLog.length > CHAT_LOG_MAX) {
       this.chatLog.splice(0, this.chatLog.length - CHAT_LOG_MAX);
+    }
+    // 圖片配額：由新到舊數，超過 CHAT_IMG_KEEP 的舊圖釋放記憶體、標記過期
+    let imgCount = 0;
+    for (let i = this.chatLog.length - 1; i >= 0; i--) {
+      const m = this.chatLog[i];
+      if (m.image) {
+        imgCount += 1;
+        if (imgCount > CHAT_IMG_KEEP) { m.image = null; m.imageExpired = true; }
+      }
     }
     return entry;
   }

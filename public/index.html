@@ -19,9 +19,9 @@
     /* 收合側欄：改單軌 1fr，唯一的 #main 吃滿全寬（panes 由 ResizeObserver 自動 refit） */
     body.sidebar-collapsed { grid-template-columns: 1fr; }
     body.sidebar-collapsed #sidebar { display: none; }
-    /* 右側聊天室面板開啟時多一軌；與收合側欄可疊加 */
-    body.room-open { grid-template-columns: 280px 1fr 320px; }
-    body.sidebar-collapsed.room-open { grid-template-columns: 1fr 320px; }
+    /* 右側聊天室面板開啟時多一軌（寬度可拖曳，存 --room-w）；與收合側欄可疊加 */
+    body.room-open { grid-template-columns: 280px 1fr var(--room-w, 320px); }
+    body.sidebar-collapsed.room-open { grid-template-columns: 1fr var(--room-w, 320px); }
     #room-panel { display: none; }
     body.room-open #room-panel { display: flex; }
 
@@ -670,7 +670,15 @@
       border-left: 1px solid #333;
       flex-direction: column;
       min-height: 0;
+      position: relative;
+      min-width: 0;
     }
+    /* 面板左緣拖曳把手：改面板寬度 */
+    #room-resize {
+      position: absolute; left: -3px; top: 0; bottom: 0; width: 6px;
+      cursor: col-resize; z-index: 10;
+    }
+    #room-resize:hover, #room-resize.dragging { background: #4ec9b0; opacity: 0.6; }
     #room-panel-header {
       padding: 10px 12px;
       border-bottom: 1px solid #333;
@@ -717,6 +725,34 @@
     .rc-write-toggle { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #aaa; cursor: pointer; user-select: none; }
     .rc-write-toggle input { width: auto; cursor: pointer; }
     #room-btn.on { background: #2d5a4a; color: #cdebdf; }
+    /* 聊天貼圖 */
+    #room-chat .msg .chat-img {
+      display: block; max-width: 100%; max-height: 200px; border-radius: 4px;
+      border: 1px solid #3a3a3a; margin-top: 4px; cursor: zoom-in;
+    }
+    #room-chat .msg .img-expired { color: #666; font-style: italic; font-size: 11px; }
+    /* @mention */
+    #room-chat .msg .mention { color: #4ec9b0; font-weight: 600; }
+    #room-chat .msg .mention.me { background: #4a3d13; color: #ffd97a; border-radius: 3px; padding: 0 3px; }
+    #room-chat .msg.mentioned { background: #2e2a1a; border-left: 2px solid #d7ba7d; padding-left: 6px; border-radius: 2px; }
+    /* mention 自動補齊下拉（貼在輸入列上方） */
+    .mention-pop {
+      position: absolute; bottom: 100%; left: 8px; right: 8px; margin-bottom: 4px;
+      background: #2d2d2d; border: 1px solid #444; border-radius: 4px;
+      box-shadow: 0 -4px 14px rgba(0,0,0,0.4); z-index: 50;
+      max-height: 150px; overflow-y: auto; display: none;
+    }
+    .mention-pop.visible { display: block; }
+    .mention-pop .mi { padding: 5px 10px; cursor: pointer; font-size: 12px; color: #ccc; }
+    .mention-pop .mi:hover, .mention-pop .mi.active { background: #094771; color: #fff; }
+    #room-chat-input-row { position: relative; }
+    /* 圖片 lightbox */
+    #img-lightbox {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 400;
+      display: none; align-items: center; justify-content: center; cursor: zoom-out;
+    }
+    #img-lightbox.visible { display: flex; }
+    #img-lightbox img { max-width: 92vw; max-height: 92vh; border-radius: 4px; }
 
     /* toast */
     #toast-host {
@@ -799,6 +835,7 @@
 
   <!-- 聊天室（房主側面板，第三欄；body.room-open 時顯示） -->
   <aside id="room-panel">
+    <div id="room-resize" title="拖曳調整面板寬度"></div>
     <header id="room-panel-header">
       <h1>聊天室</h1>
       <div style="display:flex; gap:4px">
@@ -811,11 +848,17 @@
       <div id="room-chat-head"><span id="room-chat-title">未選擇房間</span><span id="room-chat-conn"></span></div>
       <div id="room-chat-msgs"></div>
       <div id="room-chat-input-row">
-        <input id="room-chat-input" type="text" placeholder="以房主身分發言…" maxlength="2000" autocomplete="off" disabled />
+        <div class="mention-pop" id="room-mention-pop"></div>
+        <button class="btn tiny" id="room-chat-img" title="貼圖（也可直接在輸入框 Ctrl+V 貼上截圖）" disabled>🖼</button>
+        <input id="room-chat-input" type="text" placeholder="發言… @ 可 tag 人" maxlength="2000" autocomplete="off" disabled />
         <button class="btn tiny" id="room-chat-send" disabled>送出</button>
+        <input type="file" id="room-chat-file" accept="image/*" style="display:none" />
       </div>
     </div>
   </aside>
+
+  <!-- 聊天貼圖放大檢視 -->
+  <div id="img-lightbox"><img alt="" /></div>
 
   <!-- Modal: 建立聊天室 -->
   <div class="modal-backdrop" id="room-modal">

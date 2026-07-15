@@ -514,12 +514,24 @@ httpServer.on('upgrade', (req, socket, head) => {
   });
 });
 
-// 房間聊天訊息：入 log + 廣播給房內所有成員
-function roomChat(room, { from, nickname, text }) {
-  if (typeof text !== 'string') return;
-  const clean = text.slice(0, 2000).trim();
-  if (!clean) return;
-  const entry = room.addChat({ from, nickname: nickname || '', text: clean, ts: new Date().toISOString() });
+// 房間聊天訊息：入 log + 廣播給房內所有成員。支援文字與貼圖（data URL，前端已壓縮）
+const CHAT_IMG_MAX_CHARS = 2 * 1024 * 1024; // base64 字串長度上限（≈1.5MB 二進位）
+function roomChat(room, { from, nickname, text, image }) {
+  const cleanText = typeof text === 'string' ? text.slice(0, 2000).trim() : '';
+  let cleanImage = null;
+  if (typeof image === 'string'
+      && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(image)
+      && image.length <= CHAT_IMG_MAX_CHARS) {
+    cleanImage = image;
+  }
+  if (!cleanText && !cleanImage) return;
+  const entry = room.addChat({
+    from,
+    nickname: nickname || '',
+    text: cleanText,
+    image: cleanImage,
+    ts: new Date().toISOString(),
+  });
   room.broadcast({ type: 'chat', ...entry });
 }
 
@@ -535,7 +547,7 @@ function handleRoomHostConnection(ws, room) {
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
-    if (msg.type === 'chat') roomChat(room, { from: 'host', nickname: '房主', text: msg.text });
+    if (msg.type === 'chat') roomChat(room, { from: 'host', nickname: '房主', text: msg.text, image: msg.image });
   });
   ws.on('close', () => room.hostSockets.delete(ws));
   ws.on('error', () => room.hostSockets.delete(ws));
@@ -574,7 +586,7 @@ function handleConnection(ws, session, guestCtx) {
       if (guestCtx) return;   // 訪客不許 resize（會弄亂房主畫面）
       session.resize(msg.cols, msg.rows);
     } else if (msg.type === 'chat' && guestCtx) {
-      roomChat(guestCtx.room, { from: 'guest', nickname: guestCtx.guest.nickname, text: msg.text });
+      roomChat(guestCtx.room, { from: 'guest', nickname: guestCtx.guest.nickname, text: msg.text, image: msg.image });
     }
   });
 

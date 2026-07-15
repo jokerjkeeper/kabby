@@ -1469,6 +1469,107 @@
     return location.origin + '/room.html?key=' + encodeURIComponent(room.key);
   }
 
+  // ── 聊天共用：貼圖壓縮 / lightbox / @mention 渲染 ──
+  // 圖片 → data URL：大圖用 canvas 縮到 1600px 內、轉 JPEG；gif 保留動圖（超限就拒收）
+  const CHAT_IMG_MAX = 2 * 1024 * 1024; // base64 字串長度上限（跟後端一致）
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+  async function prepareChatImage(file) {
+    if (!file || !/^image\//.test(file.type)) return null;
+    const raw = await fileToDataUrl(file);
+    if (file.type === 'image/gif') return raw.length <= CHAT_IMG_MAX ? raw : null;
+    if (raw.length <= 300_000) return raw;   // 小圖不重壓
+    const img = new Image();
+    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = raw; });
+    const MAX_DIM = 1600;
+    const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.width * scale));
+    canvas.height = Math.max(1, Math.round(img.height * scale));
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    let out = canvas.toDataURL('image/jpeg', 0.85);
+    if (out.length > CHAT_IMG_MAX) out = canvas.toDataURL('image/jpeg', 0.6);
+    return out.length <= CHAT_IMG_MAX ? out : null;
+  }
+
+  const lightbox = document.getElementById('img-lightbox');
+  function openLightbox(src) {
+    lightbox.querySelector('img').src = src;
+    lightbox.classList.add('visible');
+  }
+  lightbox.addEventListener('click', () => {
+    lightbox.classList.remove('visible');
+    lightbox.querySelector('img').src = '';
+  });
+
+  // 文字裡的 @暱稱 上色；selfName 被 tag 時加 .me
+  function renderChatText(text, selfName) {
+    return escapeHtml(text).replace(/@([^\s@]{1,24})/g, (m0, name) =>
+      `<span class="mention${name === selfName ? ' me' : ''}">@${name}</span>`);
+  }
+  function isMentioned(text, selfName) {
+    return typeof text === 'string' && selfName && text.includes('@' + selfName);
+  }
+
+  // @mention 自動補齊：偵測輸入框游標前的 @prefix，彈候選清單（↑↓ / Enter / Tab / 點擊）
+  function setupMention(inputEl, popEl, getCandidates) {
+    let items = [];
+    let active = 0;
+    let atStart = -1;   // 目前補齊中的 '@' 位置；-1 = 未開啟
+
+    function close() { popEl.classList.remove('visible'); items = []; atStart = -1; }
+    function render() {
+      popEl.innerHTML = items.map((n, i) =>
+        `<div class="mi${i === active ? ' active' : ''}" data-i="${i}">@${escapeHtml(n)}</div>`).join('');
+      popEl.classList.add('visible');
+    }
+    function pick(i) {
+      const name = items[i];
+      if (name == null) { close(); return; }
+      const v = inputEl.value;
+      const caret = inputEl.selectionStart;
+      inputEl.value = v.slice(0, atStart) + '@' + name + ' ' + v.slice(caret);
+      const pos = atStart + name.length + 2;
+      inputEl.setSelectionRange(pos, pos);
+      inputEl.focus();
+      close();
+    }
+    function update() {
+      const caret = inputEl.selectionStart;
+      const before = inputEl.value.slice(0, caret);
+      const at = before.lastIndexOf('@');
+      // '@' 要在字串頭或空白後，且 @ 到游標間不含空白
+      if (at < 0 || (at > 0 && !/\s/.test(before[at - 1])) || /\s/.test(before.slice(at + 1))) { close(); return; }
+      const prefix = before.slice(at + 1).toLowerCase();
+      items = getCandidates().filter((n) => n.toLowerCase().startsWith(prefix));
+      if (!items.length) { close(); return; }
+      atStart = at;
+      active = 0;
+      render();
+    }
+    inputEl.addEventListener('input', update);
+    inputEl.addEventListener('click', update);
+    inputEl.addEventListener('keydown', (e) => {
+      if (!popEl.classList.contains('visible')) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % items.length; render(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active - 1 + items.length) % items.length; render(); }
+      else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); pick(active); }
+      else if (e.key === 'Escape') { e.stopPropagation(); close(); }
+    });
+    inputEl.addEventListener('blur', () => setTimeout(close, 150)); // 留時間給點擊
+    popEl.addEventListener('mousedown', (e) => {
+      const mi = e.target.closest('.mi');
+      if (mi) { e.preventDefault(); pick(parseInt(mi.dataset.i, 10)); }
+    });
+    return { isOpen: () => popEl.classList.contains('visible') };
+  }
+
   function setRoomPanel(open) {
     document.body.classList.toggle('room-open', open);
     roomBtn.classList.toggle('on', open);
@@ -1569,10 +1670,16 @@
     roomChatConnect(id);
   }
 
+  const roomChatImgBtn = document.getElementById('room-chat-img');
+  function setRoomChatEnabled(on) {
+    roomChatInputEl.disabled = !on;
+    roomChatSendBtn.disabled = !on;
+    roomChatImgBtn.disabled = !on;
+  }
+
   function roomChatDisconnect() {
     if (roomWs) { try { roomWs.close(); } catch {} roomWs = null; }
-    roomChatInputEl.disabled = true;
-    roomChatSendBtn.disabled = true;
+    setRoomChatEnabled(false);
     roomChatConnEl.textContent = '';
   }
 
@@ -1589,15 +1696,14 @@
     ws.onopen = () => {
       roomChatConnEl.textContent = '● 已連線';
       roomChatConnEl.style.color = '#4caf50';
-      roomChatInputEl.disabled = false;
-      roomChatSendBtn.disabled = false;
+      setRoomChatEnabled(true);
     };
     ws.onmessage = (event) => {
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       if (msg.type === 'room-init') {
         roomChatMsgsEl.innerHTML = '';
-        for (const m of msg.chatLog || []) roomAppendChat(m);
+        for (const m of msg.chatLog || []) roomAppendChat(m, true);
       } else if (msg.type === 'chat') {
         roomAppendChat(msg);
       } else if (msg.type === 'room-presence') {
@@ -1613,23 +1719,30 @@
       if (roomWs === ws) {
         roomChatConnEl.textContent = '○ 已斷線';
         roomChatConnEl.style.color = '#f44336';
-        roomChatInputEl.disabled = true;
-        roomChatSendBtn.disabled = true;
+        setRoomChatEnabled(false);
       }
     };
     ws.onerror = () => { try { ws.close(); } catch {} };
   }
 
-  function roomAppendChat(m) {
+  const HOST_SELF_NAME = '房主';
+  function roomAppendChat(m, isReplay) {
     const el = document.createElement('div');
     if (m.from === 'system') {
       el.className = 'msg system';
       el.textContent = m.text;
     } else {
-      el.className = 'msg ' + (m.from === 'host' ? 'host' : 'guest');
+      const mentioned = m.from !== 'host' && isMentioned(m.text, HOST_SELF_NAME);
+      el.className = 'msg ' + (m.from === 'host' ? 'host' : 'guest') + (mentioned ? ' mentioned' : '');
       const ts = m.ts ? new Date(m.ts).toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute: '2-digit' }) : '';
-      el.innerHTML = `<span class="who">${escapeHtml(m.from === 'host' ? '房主' : m.nickname || '訪客')}</span>`
-        + `${escapeHtml(m.text)}<span class="ts">${ts}</span>`;
+      let body = m.text ? renderChatText(m.text, HOST_SELF_NAME) : '';
+      if (m.image) body += `<img class="chat-img" src="${m.image}" alt="貼圖" />`;
+      else if (m.imageExpired) body += '<span class="img-expired">[圖片已釋放（僅保留最近 20 張）]</span>';
+      el.innerHTML = `<span class="who">${escapeHtml(m.from === 'host' ? HOST_SELF_NAME : m.nickname || '訪客')}</span>`
+        + `${body}<span class="ts">${ts}</span>`;
+      const img = el.querySelector('.chat-img');
+      if (img) img.addEventListener('click', () => openLightbox(m.image));
+      if (mentioned && !isReplay) showToast(`💬 ${m.nickname || '訪客'} 在聊天室 tag 了你`, 'warn');
     }
     roomChatMsgsEl.appendChild(el);
     roomChatMsgsEl.scrollTop = roomChatMsgsEl.scrollHeight;
@@ -1640,6 +1753,14 @@
     if (!text || !roomWs || roomWs.readyState !== WebSocket.OPEN) return;
     roomWs.send(JSON.stringify({ type: 'chat', text }));
     roomChatInputEl.value = '';
+  }
+
+  async function roomSendImage(file) {
+    if (!roomWs || roomWs.readyState !== WebSocket.OPEN) { showToast('未連線，圖片未送出', 'warn'); return; }
+    let dataUrl = null;
+    try { dataUrl = await prepareChatImage(file); } catch {}
+    if (!dataUrl) { showToast('圖片讀取失敗或壓縮後仍超過大小上限', 'warn'); return; }
+    roomWs.send(JSON.stringify({ type: 'chat', image: dataUrl }));
   }
 
   // ── 建房 modal ──
@@ -1697,7 +1818,64 @@
   document.getElementById('rm-cancel').addEventListener('click', rmClose);
   rm.submit.addEventListener('click', rmSubmit);
   roomChatSendBtn.addEventListener('click', roomSendChat);
-  roomChatInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') roomSendChat(); });
+
+  // @mention 補齊：候選 = 選中房間的訪客暱稱（mention 開著時 Enter 是選字，不送出）
+  const roomMention = setupMention(
+    roomChatInputEl,
+    document.getElementById('room-mention-pop'),
+    () => {
+      const room = rooms.find((r) => r.id === selectedRoomId);
+      return room ? room.guests.map((g) => g.nickname) : [];
+    }
+  );
+  roomChatInputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !roomMention.isOpen()) roomSendChat();
+  });
+
+  // 貼圖：🖼 按鈕選檔 / 輸入框直接 Ctrl+V 貼截圖
+  const roomChatFileEl = document.getElementById('room-chat-file');
+  roomChatImgBtn.addEventListener('click', () => roomChatFileEl.click());
+  roomChatFileEl.addEventListener('change', () => {
+    if (roomChatFileEl.files[0]) roomSendImage(roomChatFileEl.files[0]);
+    roomChatFileEl.value = '';
+  });
+  roomChatInputEl.addEventListener('paste', (e) => {
+    const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
+    if (item) { e.preventDefault(); roomSendImage(item.getAsFile()); }
+  });
+
+  // 面板寬度拖曳（左緣把手）：寬度存 --room-w + localStorage，拖完 refit 終端
+  (function initRoomResize() {
+    const handle = document.getElementById('room-resize');
+    try {
+      const saved = parseInt(localStorage.getItem('kabby-room-w') || '', 10);
+      if (saved >= 240 && saved <= 720) document.body.style.setProperty('--room-w', saved + 'px');
+    } catch {}
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      handle.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'col-resize';
+      const onMove = (ev) => {
+        const w = Math.max(240, Math.min(720, window.innerWidth - ev.clientX));
+        document.body.style.setProperty('--room-w', w + 'px');
+      };
+      const onUp = (ev) => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        handle.classList.remove('dragging');
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        const w = Math.max(240, Math.min(720, window.innerWidth - ev.clientX));
+        try { localStorage.setItem('kabby-room-w', String(w)); } catch {}
+        const t = activeTab();
+        if (t) fitTab(t);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  })();
+
   roomModal.addEventListener('click', (e) => { if (e.target === roomModal) rmClose(); });
   document.addEventListener('keydown', (e) => {
     if (!roomModal.classList.contains('visible')) return;

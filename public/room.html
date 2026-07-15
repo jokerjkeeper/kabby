@@ -51,13 +51,21 @@
     #term-side .xterm { height: auto; }
 
     #chat-side {
-      flex: 0 0 300px;
+      flex: 0 0 var(--chat-w, 300px);
       border-left: 1px solid #333;
       background: #252526;
       display: flex;
       flex-direction: column;
       min-height: 0;
+      position: relative;
+      min-width: 0;
     }
+    /* 聊天欄左緣拖曳把手 */
+    #chat-resize {
+      position: absolute; left: -3px; top: 0; bottom: 0; width: 6px;
+      cursor: col-resize; z-index: 10;
+    }
+    #chat-resize:hover, #chat-resize.dragging { background: #4ec9b0; opacity: 0.6; }
     #chat-head {
       padding: 8px 12px;
       border-bottom: 1px solid #333;
@@ -84,8 +92,34 @@
     .msg.me .who { color: #dcdcaa; }
     .msg .ts { color: #666; font-size: 10px; margin-left: 6px; }
     .msg.system { color: #888; font-size: 11px; font-style: italic; }
+    /* 貼圖 */
+    .msg .chat-img {
+      display: block; max-width: 100%; max-height: 200px; border-radius: 4px;
+      border: 1px solid #3a3a3a; margin-top: 4px; cursor: zoom-in;
+    }
+    .msg .img-expired { color: #666; font-style: italic; font-size: 11px; }
+    /* @mention */
+    .msg .mention { color: #4ec9b0; font-weight: 600; }
+    .msg .mention.me { background: #4a3d13; color: #ffd97a; border-radius: 3px; padding: 0 3px; }
+    .msg.mentioned { background: #2e2a1a; border-left: 2px solid #d7ba7d; padding-left: 6px; border-radius: 2px; }
+    .mention-pop {
+      position: absolute; bottom: 100%; left: 8px; right: 8px; margin-bottom: 4px;
+      background: #2d2d2d; border: 1px solid #444; border-radius: 4px;
+      box-shadow: 0 -4px 14px rgba(0,0,0,0.4); z-index: 50;
+      max-height: 150px; overflow-y: auto; display: none;
+    }
+    .mention-pop.visible { display: block; }
+    .mention-pop .mi { padding: 5px 10px; cursor: pointer; font-size: 12px; color: #ccc; }
+    .mention-pop .mi:hover, .mention-pop .mi.active { background: #094771; color: #fff; }
+    /* 圖片 lightbox */
+    #img-lightbox {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 400;
+      display: none; align-items: center; justify-content: center; cursor: zoom-out;
+    }
+    #img-lightbox.visible { display: flex; }
+    #img-lightbox img { max-width: 92vw; max-height: 92vh; border-radius: 4px; }
 
-    #chat-input-row { flex: 0 0 auto; display: flex; gap: 6px; padding: 8px; border-top: 1px solid #333; }
+    #chat-input-row { flex: 0 0 auto; display: flex; gap: 6px; padding: 8px; border-top: 1px solid #333; position: relative; }
     #chat-input {
       flex: 1;
       background: #1e1e1e;
@@ -155,15 +189,22 @@
   <div id="layout">
     <div id="term-side"></div>
     <aside id="chat-side">
+      <div id="chat-resize" title="拖曳調整聊天欄寬度"></div>
       <div id="chat-head"><span>聊天</span><span id="guest-count"></span></div>
       <div id="guest-list"></div>
       <div id="chat-msgs"></div>
       <div id="chat-input-row">
-        <input id="chat-input" type="text" placeholder="輸入訊息…" maxlength="2000" autocomplete="off" />
+        <div class="mention-pop" id="mention-pop"></div>
+        <button class="btn" id="chat-img" style="background:#3c3c3c; padding:6px 10px" title="貼圖（也可直接在輸入框 Ctrl+V 貼上截圖）">🖼</button>
+        <input id="chat-input" type="text" placeholder="訊息… @ 可 tag 人" maxlength="2000" autocomplete="off" />
         <button class="btn" id="chat-send">送出</button>
+        <input type="file" id="chat-file" accept="image/*" style="display:none" />
       </div>
     </aside>
   </div>
+
+  <!-- 聊天貼圖放大檢視 -->
+  <div id="img-lightbox"><img alt="" /></div>
 
   <!-- 入房表單 / 房間關閉提示 -->
   <div id="overlay">

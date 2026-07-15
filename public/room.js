@@ -41,6 +41,112 @@
     setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, 4000);
   }
 
+  // ── 貼圖：壓縮成 data URL 直接走 WS（伺服器端存記憶體，只留最近 20 張）──
+  const CHAT_IMG_MAX = 2 * 1024 * 1024;
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+  async function prepareChatImage(file) {
+    if (!file || !/^image\//.test(file.type)) return null;
+    const raw = await fileToDataUrl(file);
+    if (file.type === 'image/gif') return raw.length <= CHAT_IMG_MAX ? raw : null;
+    if (raw.length <= 300_000) return raw;
+    const img = new Image();
+    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = raw; });
+    const MAX_DIM = 1600;
+    const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.width * scale));
+    canvas.height = Math.max(1, Math.round(img.height * scale));
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    let out = canvas.toDataURL('image/jpeg', 0.85);
+    if (out.length > CHAT_IMG_MAX) out = canvas.toDataURL('image/jpeg', 0.6);
+    return out.length <= CHAT_IMG_MAX ? out : null;
+  }
+
+  const lightbox = document.getElementById('img-lightbox');
+  function openLightbox(src) {
+    lightbox.querySelector('img').src = src;
+    lightbox.classList.add('visible');
+  }
+  lightbox.addEventListener('click', () => {
+    lightbox.classList.remove('visible');
+    lightbox.querySelector('img').src = '';
+  });
+
+  // ── @mention：文字上色 + 被 tag 提示 + 輸入補齊 ──
+  function renderChatText(text, selfName) {
+    return escapeHtml(text).replace(/@([^\s@]{1,24})/g, (m0, name) =>
+      `<span class="mention${name === selfName ? ' me' : ''}">@${name}</span>`);
+  }
+  function isMentioned(text, selfName) {
+    return typeof text === 'string' && selfName && text.includes('@' + selfName);
+  }
+
+  let knownGuests = [];   // 最近一次 presence 名單（mention 候選用）
+  function mentionCandidates() {
+    const self = joinInfo ? joinInfo.nickname : null;
+    const names = knownGuests.map((g) => g.nickname).filter((n) => n !== self);
+    names.unshift('房主');
+    return names;
+  }
+
+  function setupMention(inputEl, popEl, getCandidates) {
+    let items = [];
+    let active = 0;
+    let atStart = -1;
+
+    function close() { popEl.classList.remove('visible'); items = []; atStart = -1; }
+    function render() {
+      popEl.innerHTML = items.map((n, i) =>
+        `<div class="mi${i === active ? ' active' : ''}" data-i="${i}">@${escapeHtml(n)}</div>`).join('');
+      popEl.classList.add('visible');
+    }
+    function pick(i) {
+      const name = items[i];
+      if (name == null) { close(); return; }
+      const v = inputEl.value;
+      const caret = inputEl.selectionStart;
+      inputEl.value = v.slice(0, atStart) + '@' + name + ' ' + v.slice(caret);
+      const pos = atStart + name.length + 2;
+      inputEl.setSelectionRange(pos, pos);
+      inputEl.focus();
+      close();
+    }
+    function update() {
+      const caret = inputEl.selectionStart;
+      const before = inputEl.value.slice(0, caret);
+      const at = before.lastIndexOf('@');
+      if (at < 0 || (at > 0 && !/\s/.test(before[at - 1])) || /\s/.test(before.slice(at + 1))) { close(); return; }
+      const prefix = before.slice(at + 1).toLowerCase();
+      items = getCandidates().filter((n) => n.toLowerCase().startsWith(prefix));
+      if (!items.length) { close(); return; }
+      atStart = at;
+      active = 0;
+      render();
+    }
+    inputEl.addEventListener('input', update);
+    inputEl.addEventListener('click', update);
+    inputEl.addEventListener('keydown', (e) => {
+      if (!popEl.classList.contains('visible')) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % items.length; render(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active - 1 + items.length) % items.length; render(); }
+      else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); pick(active); }
+      else if (e.key === 'Escape') { e.stopPropagation(); close(); }
+    });
+    inputEl.addEventListener('blur', () => setTimeout(close, 150));
+    popEl.addEventListener('mousedown', (e) => {
+      const mi = e.target.closest('.mi');
+      if (mi) { e.preventDefault(); pick(parseInt(mi.dataset.i, 10)); }
+    });
+    return { isOpen: () => popEl.classList.contains('visible') };
+  }
+
   // ── 入房表單（note = 頂部提示，例如「房間已關閉」）──
   function showJoinForm(note) {
     overlay.classList.remove('hidden');
@@ -183,7 +289,7 @@
           setAllowWrite(!!msg.room.allowWrite, true);
         }
         chatMsgsEl.innerHTML = '';
-        for (const m of msg.chatLog || []) appendChat(m);
+        for (const m of msg.chatLog || []) appendChat(m, true);
         renderGuests(msg.guests || []);
         break;
       case 'chat':
@@ -212,17 +318,25 @@
   }
 
   // ── 聊天 ──
-  function appendChat(m) {
+  function appendChat(m, isReplay) {
     const el = document.createElement('div');
     if (m.from === 'system') {
       el.className = 'msg system';
       el.textContent = m.text;
     } else {
-      const mine = m.from === 'guest' && joinInfo && m.nickname === joinInfo.nickname;
-      el.className = 'msg ' + (m.from === 'host' ? 'host' : 'guest') + (mine ? ' me' : '');
+      const selfName = joinInfo ? joinInfo.nickname : null;
+      const mine = m.from === 'guest' && m.nickname === selfName;
+      const mentioned = !mine && isMentioned(m.text, selfName);
+      el.className = 'msg ' + (m.from === 'host' ? 'host' : 'guest') + (mine ? ' me' : '') + (mentioned ? ' mentioned' : '');
       const ts = m.ts ? new Date(m.ts).toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute: '2-digit' }) : '';
+      let body = m.text ? renderChatText(m.text, selfName) : '';
+      if (m.image) body += `<img class="chat-img" src="${m.image}" alt="貼圖" />`;
+      else if (m.imageExpired) body += '<span class="img-expired">[圖片已釋放（僅保留最近 20 張）]</span>';
       el.innerHTML = `<span class="who">${escapeHtml(m.from === 'host' ? '房主' : m.nickname || '訪客')}</span>`
-        + `${escapeHtml(m.text)}<span class="ts">${ts}</span>`;
+        + `${body}<span class="ts">${ts}</span>`;
+      const img = el.querySelector('.chat-img');
+      if (img) img.addEventListener('click', () => openLightbox(m.image));
+      if (mentioned && !isReplay) showToast(`💬 ${m.from === 'host' ? '房主' : m.nickname} tag 了你`, 'warn');
     }
     chatMsgsEl.appendChild(el);
     chatMsgsEl.scrollTop = chatMsgsEl.scrollHeight;
@@ -236,7 +350,16 @@
     chatInputEl.value = '';
   }
 
+  async function sendImage(file) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) { showToast('未連線，圖片未送出', 'warn'); return; }
+    let dataUrl = null;
+    try { dataUrl = await prepareChatImage(file); } catch {}
+    if (!dataUrl) { showToast('圖片讀取失敗或壓縮後仍超過大小上限', 'warn'); return; }
+    ws.send(JSON.stringify({ type: 'chat', image: dataUrl }));
+  }
+
   function renderGuests(guests) {
+    knownGuests = guests;   // mention 候選同步更新
     guestCountEl.textContent = guests.length ? `${guests.filter((g) => g.online).length}/${guests.length} 在線` : '';
     guestListEl.innerHTML = guests.map((g) =>
       `<span class="guest-chip ${g.online ? 'online' : 'offline'}"><span class="dot">●</span>${escapeHtml(g.nickname)}</span>`
@@ -245,7 +368,56 @@
 
   // ── 綁事件 + boot ──
   document.getElementById('chat-send').addEventListener('click', sendChat);
-  chatInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+
+  // @mention 補齊（開著時 Enter 是選字，不送出）
+  const mention = setupMention(chatInputEl, document.getElementById('mention-pop'), mentionCandidates);
+  chatInputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !mention.isOpen()) sendChat();
+  });
+
+  // 貼圖：🖼 按鈕選檔 / 輸入框 Ctrl+V 貼截圖
+  const chatFileEl = document.getElementById('chat-file');
+  document.getElementById('chat-img').addEventListener('click', () => chatFileEl.click());
+  chatFileEl.addEventListener('change', () => {
+    if (chatFileEl.files[0]) sendImage(chatFileEl.files[0]);
+    chatFileEl.value = '';
+  });
+  chatInputEl.addEventListener('paste', (e) => {
+    const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
+    if (item) { e.preventDefault(); sendImage(item.getAsFile()); }
+  });
+
+  // 聊天欄寬度拖曳（左緣把手），存 localStorage
+  (function initChatResize() {
+    const handle = document.getElementById('chat-resize');
+    const root = document.documentElement;
+    try {
+      const saved = parseInt(localStorage.getItem('kabby-room-chat-w') || '', 10);
+      if (saved >= 220 && saved <= 640) root.style.setProperty('--chat-w', saved + 'px');
+    } catch {}
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      handle.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'col-resize';
+      const onMove = (ev) => {
+        const w = Math.max(220, Math.min(640, window.innerWidth - ev.clientX));
+        root.style.setProperty('--chat-w', w + 'px');
+      };
+      const onUp = (ev) => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        handle.classList.remove('dragging');
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        const w = Math.max(220, Math.min(640, window.innerWidth - ev.clientX));
+        try { localStorage.setItem('kabby-room-chat-w', String(w)); } catch {}
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  })();
+
   document.getElementById('leave-btn').addEventListener('click', leaveRoom);
 
   (function boot() {

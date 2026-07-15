@@ -260,7 +260,7 @@ ticket 是之後 WS 連線的憑證（`/ws/:sessionId?ticket=`），房間關閉
 |---|---|---|
 | `input` | `data: string` | 寫進 PTY（訪客受 `allowWrite` 管制） |
 | `resize` | `cols: number, rows: number` | resize PTY（latest-resize-wins，多 client 互覆蓋；訪客忽略） |
-| `chat` | `text: string` | （訪客連線）發聊天訊息，廣播全房 |
+| `chat` | `text?: string, image?: string` | （訪客連線）發聊天訊息，廣播全房。`image` 為 data URL（`data:image/png|jpeg|webp|gif;base64,...`，≤2M 字元，前端已壓縮；伺服器只保留每房最近 20 張，舊圖退化成 `imageExpired`） |
 
 非 JSON 或未知 type 一律忽略。
 
@@ -273,7 +273,7 @@ ticket 是之後 WS 連線的憑證（`/ws/:sessionId?ticket=`），房間關閉
 | `exit` | `code: number, signal: string\|null` | PTY 進程結束 |
 | `blocked` | `words: string[]` | 輸入含敏感詞被攔截 |
 | `room-init` | `room, nickname, chatLog, guests` | （訪客）連上時的房間狀態 + 聊天歷史 |
-| `chat` | `from, nickname, text, ts` | 房內聊天訊息（`from: host\|guest\|system`） |
+| `chat` | `from, nickname, text, image?, imageExpired?, ts` | 房內聊天訊息（`from: host\|guest\|system`） |
 | `room-presence` | `guests: [...]` | 訪客加入 / 離開 |
 | `room-config` | `allowWrite: boolean` | 房主切換輸入權限 |
 | `room-closed` | `reason` | 房間關閉（`host-closed` / `session-exit`） |
