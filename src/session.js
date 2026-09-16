@@ -8,6 +8,17 @@ const providers = require('./providers');
 
 const INPUT_MATCHER_TTL = 3000; // 敏感詞 matcher 快取（避免每個 keystroke 都讀檔）
 
+// PTY 尺寸上下限。client 建 session 時會帶上量好的 cols/rows（見 public/app.js
+// newSessionDims），讓 cc 第一幀就用正確寬度畫 TUI；沒帶或帶了不合理的值才吃預設。
+const COLS_MIN = 20, COLS_MAX = 500;
+const ROWS_MIN = 5, ROWS_MAX = 200;
+
+function clampDim(value, fallback, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
 class Session extends EventEmitter {
   constructor({ name, cwd, cmd, args, cols = 220, rows = 50, profileId = null, provider = 'claude' }) {
     super();
@@ -17,6 +28,8 @@ class Session extends EventEmitter {
     this.provider = providerInfo.id;
     this.cwd = cwd || process.cwd();
     this.createdAt = new Date().toISOString();
+    cols = clampDim(cols, 220, COLS_MIN, COLS_MAX);
+    rows = clampDim(rows, 50, ROWS_MIN, ROWS_MAX);
     this.cols = cols;
     this.rows = rows;
     this.scrollback = new RingBuffer();
@@ -108,6 +121,9 @@ class Session extends EventEmitter {
 
   resize(cols, rows) {
     if (!this.alive) return;
+    cols = clampDim(cols, this.cols, COLS_MIN, COLS_MAX);
+    rows = clampDim(rows, this.rows, ROWS_MIN, ROWS_MAX);
+    if (cols === this.cols && rows === this.rows) return;   // 尺寸沒變就別戳 PTY（避免 cc 無謂重繪）
     this.cols = cols;
     this.rows = rows;
     try { this.proc.resize(cols, rows); } catch {}

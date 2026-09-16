@@ -326,7 +326,9 @@
       min-width: 0;
       min-height: 0;
       overflow: hidden;
-      padding: 4px;
+      /* 8px 讓文字不貼視窗邊緣；FitAddon 以 parent 的 content box 量寬度，
+         padding 會被正確扣掉，不會多算欄數。 */
+      padding: 8px;
       border: 1px solid transparent;
     }
     .term-pane.focused { border-color: #4ec9b0; }

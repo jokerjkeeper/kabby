@@ -230,7 +230,7 @@ app.post('/api/profiles/:id/launch', (req, res) => {
   const profile = profileStore.get(req.params.id);
   if (!profile) return res.status(404).json({ error: 'profile not found' });
   const provider = providers.getProvider(profile.provider);
-  const { resume, sessionName } = req.body || {};
+  const { resume, sessionName, cols, rows } = req.body || {};
 
   if (resume && !provider.resumeSupported) {
     return res.status(400).json({ error: `${provider.label} 尚未支援 history resume` });
@@ -259,6 +259,8 @@ app.post('/api/profiles/:id/launch', (req, res) => {
       cwd: profile.cwd,
       cmd: profile.cmd || undefined,
       args: baseArgs,
+      cols,
+      rows,
       profileId: profile.id,
       provider: provider.id,
     });

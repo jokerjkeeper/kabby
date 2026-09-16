@@ -1,6 +1,74 @@
 /* kabby Web UI — SPA (Phase 2.5 with profiles) */
 (() => {
   const API = '';
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 終端字型與初始 PTY 尺寸估算
+  //
+  // 為什麼要估：PTY 若以 daemon 預設寬度（220 欄）啟動，cc 會先用 220 欄畫好 TUI
+  // 邊框並硬換行寫進 scrollback；等 pane 掛好、fit() 算出真實欄數（例如 100）再
+  // resize 時，那些 220 欄的長行會被 xterm 重新折行，畫面右緣就出現「斷層」。
+  // 建 session 時就把接近真實的 cols/rows 帶上去，第一幀起寬度就是對的。
+  //
+  // 這裡是估算值（±1 欄），掛上 xterm 後 fit() 仍會送一次精確 resize。差 1 欄的
+  // 重繪發生在 scrollback 幾乎是空的開場，肉眼無感；真正會炸版面的是 220→100。
+  // ──────────────────────────────────────────────────────────────────────
+  const TERM_FONT_SIZE = 14;
+  const TERM_FONT_FAMILY = "'Cascadia Code', Consolas, monospace";
+  const TERM_LINE_HEIGHT = 1.25;
+  const TERM_SCROLLBAR_W = 15;   // xterm viewport scrollbar，FitAddon 也會扣掉
+  const PANE_CHROME = 9;         // .term-pane 的 padding 8 + border 1
+
+  let cellMetrics = null;
+
+  // 用與 xterm 相同的字型量一個 cell 的 px 尺寸（量 'W' 的 line-height:normal 高度，
+  // 再自行乘上 lineHeight，對齊 xterm CharSizeService 的算法）
+  function measureCell() {
+    if (cellMetrics) return cellMetrics;
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden;'
+      + 'white-space:pre;line-height:normal;font-size:' + TERM_FONT_SIZE + 'px;font-family:' + TERM_FONT_FAMILY;
+    probe.textContent = 'W'.repeat(100);
+    document.body.appendChild(probe);
+    const rect = probe.getBoundingClientRect();
+    probe.remove();
+    const w = rect.width / 100;
+    const h = rect.height;
+    if (!(w > 0) || !(h > 0)) return { w: TERM_FONT_SIZE * 0.6, h: Math.ceil(TERM_FONT_SIZE * 1.2 * TERM_LINE_HEIGHT) };
+    cellMetrics = { w, h: Math.ceil(h * TERM_LINE_HEIGHT) };
+    return cellMetrics;
+  }
+
+  // 新 session 會落在哪塊區域：待填的空 pane > 目前 tab（新 tab 佔滿同一塊）> term-wrap
+  function newSessionTargetEl() {
+    if (pendingFillPaneId) {
+      const pendTab = tabOfLeaf(pendingFillPaneId);
+      const leaf = leaves.get(pendingFillPaneId);
+      if (pendTab && pendTab.id === activeTabId && leaf && leaf.el && leaf.el.clientWidth > 0) return leaf.el;
+    }
+    const tab = activeTab();
+    if (tab && tab.el && tab.el.clientWidth > 0) return tab.el;
+    return document.getElementById('term-wrap');
+  }
+
+  // 回傳 { cols, rows }，塞進建立 session 的 request body
+  function newSessionDims() {
+    try {
+      const el = newSessionTargetEl();
+      if (!el) return {};
+      const cell = measureCell();
+      const cs = getComputedStyle(el);
+      let availW = parseFloat(cs.width) || 0;
+      let availH = parseFloat(cs.height) || 0;
+      // 量到的若不是 pane 本身（例如整個 tab 容器），要先扣掉 pane 的 padding/border
+      if (!el.classList.contains('term-pane')) { availW -= PANE_CHROME * 2; availH -= PANE_CHROME * 2; }
+      availW -= TERM_SCROLLBAR_W;
+      const cols = Math.floor(availW / cell.w);
+      const rows = Math.floor(availH / cell.h);
+      if (!(cols > 1) || !(rows > 0)) return {};
+      return { cols, rows };
+    } catch { return {}; }
+  }
   const PROVIDER_UI = {
     claude: {
       cmdPlaceholder: '預設：claude.cmd（Win）/ claude（Unix）',
@@ -366,7 +434,7 @@
       const res = await apiFetch('/api/profiles/' + encodeURIComponent(profileId) + '/launch', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(resume ? { resume } : {}),
+        body: JSON.stringify({ ...newSessionDims(), ...(resume ? { resume } : {}) }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || ('HTTP ' + res.status));
@@ -622,8 +690,9 @@
     removeEmptyPlaceholder(leaf);
     const term = new Terminal({
       cursorBlink: true,
-      fontSize: 14,
-      fontFamily: "'Cascadia Code', Consolas, monospace",
+      fontSize: TERM_FONT_SIZE,
+      fontFamily: TERM_FONT_FAMILY,
+      lineHeight: TERM_LINE_HEIGHT,
       theme: { background: '#1e1e1e', foreground: '#d4d4d4', cursor: '#aeafad' },
       scrollback: 5000,
       allowProposedApi: true,
@@ -1150,7 +1219,7 @@
   async function smSubmit() {
     const name = sm.name.value.trim();
     if (!name) { sm.err.textContent = '請輸入名稱'; return; }
-    const body = { name, provider: sm.provider.value || 'claude' };
+    const body = { name, provider: sm.provider.value || 'claude', ...newSessionDims() };
     if (sm.cwd.value.trim()) body.cwd = sm.cwd.value.trim();
     if (sm.cmd.value.trim()) body.cmd = sm.cmd.value.trim();
     const args = parseArgsRaw(sm.args.value);
