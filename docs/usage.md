@@ -11,7 +11,7 @@
 ## 1. 啟動 daemon
 
 ```bash
-cd D:\Git\kabby
+cd kabby
 npm install         # 第一次
 npm start
 ```
@@ -38,7 +38,7 @@ curl http://localhost:3700/api/health
 ```bash
 curl -X POST http://localhost:3700/api/sessions \
   -H "Content-Type: application/json" \
-  -d '{"name":"unity","cwd":"D:/Projects/RS/my-app/unity"}'
+  -d '{"name":"unity","cwd":"D:/Projects/my-app"}'
 ```
 
 PowerShell 寫法：
@@ -47,7 +47,7 @@ PowerShell 寫法：
 Invoke-RestMethod -Method Post `
   -Uri http://localhost:3700/api/sessions `
   -ContentType 'application/json' `
-  -Body '{"name":"unity","provider":"claude","cwd":"D:/Projects/RS/my-app/unity"}'
+  -Body '{"name":"unity","provider":"claude","cwd":"D:/Projects/my-app"}'
 ```
 
 回應：
@@ -56,7 +56,7 @@ Invoke-RestMethod -Method Post `
 {
   "id": "8f4b1d2c-...",
   "name": "unity",
-  "cwd": "D:/Projects/RS/my-app/unity",
+  "cwd": "D:/Projects/my-app",
   "clientCount": 0,
   "alive": true
 }
@@ -64,7 +64,7 @@ Invoke-RestMethod -Method Post `
 
 > 想跑別的命令（例如本機沒裝 cc，先用 cmd 練手）：
 > ```json
-> {"name":"test","cwd":"D:/Git/kabby","cmd":"cmd.exe","args":[]}
+> {"name":"test","cwd":"D:/Projects/my-app","cmd":"cmd.exe","args":[]}
 > ```
 
 ## 4. Attach（連到 PTY）

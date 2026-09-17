@@ -2,8 +2,8 @@
  * 讀 cc 的對話歷史（~/.claude/projects/<encoded-cwd>/<uuid>.jsonl）
  *
  * 編碼規則（從 cc 觀察 + 用戶驗證）：
- *   D:\Git\kabby           →  D--Git-kabby
- *   D:\Projects\RS\my-app   →  D--Projects-RS-my-app   ← 底線也會被換
+ *   D:\Git\kabby              →  D--Git-kabby
+ *   D:\Work\my_project        →  D--Work-my-project   ← 底線也會被換
  *   D:\Git\claude-code-2.1.88 →  D--Git-claude-code-2-1-88   ← 點號也會被換
  *   規則：每個非英數字元一律換成 '-'，連續不合併。
  *

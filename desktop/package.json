@@ -2,6 +2,8 @@
   "name": "kabby-desktop",
   "version": "0.1.0",
   "description": "kabby 桌面 client — 一個指向 daemon 的視窗，等同 web UI 的 attach client",
+  "license": "MIT",
+  "author": "jokerjkeeper",
   "main": "main.js",
   "scripts": {
     "start": "electron .",

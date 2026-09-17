@@ -1,6 +1,6 @@
 # 參考產品分析：Kanban Code (langwatch/kanban-code)
 
-> 原始碼位置：`J:\git\temp\kanban-code` · 上游：https://github.com/langwatch/kanban-code
+> 上游：https://github.com/langwatch/kanban-code
 > 分析日期：2026-09-16 · 目的：作為 kabby UI / 終端渲染的對照組
 
 ## 一、產品定位

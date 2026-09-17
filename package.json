@@ -2,6 +2,12 @@
   "name": "kabby",
   "version": "0.1.0",
   "description": "PTY multiplexer daemon — one cc, many clients (desktop + iframe) attach like tmux",
+  "license": "MIT",
+  "author": "jokerjkeeper",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jokerjkeeper/kabby.git"
+  },
   "main": "src/daemon.js",
   "scripts": {
     "start": "node src/daemon.js",

@@ -24,10 +24,19 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Claude Code 本機設定 — 不入 repo
-.claude/settings.local.json
-.claude/permissions.log
-# 注意：.claude/session.md 故意不 ignore — 是跨機接續的進度檔，靠 git push/pull 帶到家裡電腦
+# Secrets / 機密 — 絕不入 repo（用 .env.example 當範本）
+.env
+.env.*
+!.env.example
+
+# Claude Code / Codex 本機設定與私密進度 — 不入 repo
+.claude/
+.codex/
+
+# 私密參考素材（第三方截圖、外部複製碼、主題素材等）
+ref-product/
+reference/
+Codex-Dream-Skin/
 
 # Test / coverage
 coverage/

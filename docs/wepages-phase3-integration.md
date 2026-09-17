@@ -6,7 +6,7 @@
 
 ## 背景（必讀）
 
-我們有一個新 daemon 叫 **kabby**，位於 `D:\Git\kabby\`，跑在 `http://localhost:3700`。它做的事情是「PTY 多工器」：一個 cc 進程、多個 client 同時 attach，類似 `tmux attach`。
+我們有一個新 daemon 叫 **kabby**（本專案），跑在 `http://localhost:3700`。它做的事情是「PTY 多工器」：一個 cc 進程、多個 client 同時 attach，類似 `tmux attach`。
 
 現況：wepages 任務頁的 Terminal 按鈕目前點下去會直接開 `http://localhost:3600/...`（ai-terminal），每次都是「**新開一個 cc**」。
 
@@ -21,7 +21,7 @@
 
 ## 不要動的東西
 
-- ❌ 不要修改 `D:\Git\aiterm-repo\class\ai-terminal\tool\` 任何代碼
+- ❌ 不要修改原本的 ai-terminal 內嵌工具（另一個獨立專案）任何代碼
 - ❌ 不要刪掉「新開 cc」這條老路，它必須繼續可用（這是回歸測試基準）
 - ❌ 不要碰 wepages 的 DB schema，綁定關係用 `localStorage` 即可
 - ❌ 不要嘗試代理或包裝 kabby API，前端直接 fetch `http://localhost:3700` 就好（kabby daemon 已設 `Access-Control-Allow-Origin: *`）
@@ -30,7 +30,7 @@
 
 ## kabby 提供的 API（你會用到的部分）
 
-> 完整 API 在 `D:\Git\kabby\docs\api.md`。
+> 完整 API 在 [`docs/api.md`](./api.md)。
 
 ### 列出活著的 kabby session
 
@@ -45,7 +45,7 @@ GET http://localhost:3700/api/sessions
   {
     "id": "8f4b1d2c-...",
     "name": "unity",
-    "cwd": "D:/Projects/RS/my-app/unity",
+    "cwd": "D:/Projects/my-app",
     "clientCount": 2,
     "alive": true,
     "ccSessionId": "abc-..."   // 若是 --resume 啟動會有
@@ -383,9 +383,9 @@ function escapeHtml(s) {
 
 照順序跑：
 
-1. **kabby daemon 跑起來**：在 `D:\Git\kabby\` 執行 `npm start`，看到 `kabby daemon listening on http://localhost:3700`
+1. **kabby daemon 跑起來**：在 kabby 專案目錄執行 `npm start`，看到 `kabby daemon listening on http://localhost:3700`
 2. **建一個 kabby session**：開 `http://localhost:3700`，點「+ 臨時」或「+ 項目」建立一個，名稱 `unity`
-3. **wepages dev server 起來**（看 `D:\Dev\Program\wepages\main.py` 的 port）
+3. **wepages dev server 起來**（看 `<wepages 專案>\main.py` 的 port）
 4. **開任務頁**，點 Terminal → 出現 modal（新流程）
 5. **選「新開 cc」→ 確認** → iframe 顯示 ai-terminal:3600（老行為，回歸 OK）
 6. 關 iframe / 重開任務頁，點 Terminal → modal 又出現（因為還沒綁定）

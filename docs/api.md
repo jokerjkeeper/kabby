@@ -57,7 +57,7 @@ wepages 以 iframe 嵌 kabby 終端，並打 `/api/sessions` 取 session 列表�
   {
     "id": "8f4b...",
     "name": "unity",
-    "cwd": "D:/Projects/RS/my-app/unity",
+    "cwd": "D:/Projects/my-app",
     "createdAt": "2026-05-19T12:00:00.000Z",
     "cols": 220,
     "rows": 50,
@@ -112,7 +112,7 @@ Request body：
   {
     "id": "...",
     "name": "unity",
-    "cwd": "D:/Projects/RS/my-app/unity",
+    "cwd": "D:/Projects/my-app",
     "cmd": "claude.cmd",
     "args": ["--dangerously-skip-permissions"],
     "createdAt": "...",
@@ -158,7 +158,7 @@ Request body：
 回該 project 的 cc 歷史目錄絕對路徑：
 
 ```json
-{ "dir": "C:\\Users\\user\\.claude\\projects\\D--Git-kabby", "exists": true }
+{ "dir": "C:\\Users\\<user>\\.claude\\projects\\D--Git-kabby", "exists": true }
 ```
 
 ### `POST /api/profiles/:id/launch`

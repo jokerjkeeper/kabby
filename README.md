@@ -71,7 +71,7 @@ npm run dev
 # 建一個 session（v1 不需要 token）
 curl -X POST http://localhost:3700/api/sessions ^
   -H "Content-Type: application/json" ^
-  -d "{\"name\":\"unity\",\"cwd\":\"D:/Projects/RS/my-app/unity\"}"
+  -d "{\"name\":\"unity\",\"cwd\":\"D:/Projects/my-app\"}"
 
 # 列出所有 session
 curl http://localhost:3700/api/sessions
@@ -126,7 +126,7 @@ PLAN.md            — 設計決策與 Phase 1-4 詳細規劃
 
 ## 跟 ai-terminal 的關係
 
-kabby 是新專案，**不修改** `D:\Git\aiterm-repo\class\ai-terminal\tool\`。差異對照見 [`reference/from-ai-terminal/README.md`](./reference/from-ai-terminal/README.md)。
+kabby 是獨立的新專案，靈感來自先前一個「每次點 Terminal 就開一個新 cc」的 ai-terminal 內嵌工具，但兩者程式碼完全獨立、互不修改。kabby 的差別在於把 cc 進程的生命週期跟 client 連線解耦，讓多個視窗能同時 attach 同一個 cc。
 
 
 ## Provider Setup

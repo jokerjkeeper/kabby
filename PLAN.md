@@ -1,7 +1,7 @@
 # kabby — PTY 多工器 daemon (v1)
 
-> **此檔目的**：給下一個 cc session 接手用。在 `D:\Git\kabby\` 目錄開新 cc 後，直接讀本檔即可進入後續 Phase 實作。
-> **原始 plan 位置**：`C:\Users\user\.claude\plans\linked-soaring-volcano.md`（已同步）
+> **此檔目的**：給下一個 cc session 接手用。在 `` 目錄開新 cc 後，直接讀本檔即可進入後續 Phase 實作。
+> **原始 plan 位置**：`~/.claude/plans/<plan-name>.md`（已同步）
 
 ---
 
@@ -9,14 +9,14 @@
 
 **為什麼做這個**
 
-- 現有 ai-terminal（`D:\Git\aiterm-repo\class\ai-terminal\tool\`）以 iframe 嵌入 wepages 任務模組，每次點 Terminal 都是「開一個新的 cc」。
-- 使用者實際工作流是：先在桌面用一個 terminal 開 cc 進入專案（例如 `D:\Projects\RS\my-app\unity\`），跑了一陣子之後想在 wepages 的「任務」分頁上**接續**這個 cc，而不是重開一個。
+- 現有 ai-terminal（`<ai-terminal 專案>\`）以 iframe 嵌入 wepages 任務模組，每次點 Terminal 都是「開一個新的 cc」。
+- 使用者實際工作流是：先在桌面用一個 terminal 開 cc 進入專案（例如 `D:\Projects\my-app\`），跑了一陣子之後想在 wepages 的「任務」分頁上**接續**這個 cc，而不是重開一個。
 - 同時要保留未來在「子清單」點擊項目，自動把 `task #123 + 子項內容` 餵進那個 cc 的能力。
 - 等於需要一個「PTY 多工器 daemon」：一個 cc 進程、多個 client（桌面 UI + 任務頁面 iframe）雙向 attach，行為類似 `tmux attach`。
 
 **目標**
 
-做一個叫 kabby 的新專案（位於 `D:\Git\kabby\`），跟 ai-terminal 完全獨立（ai-terminal 維持原樣，wepages 現有 Terminal 按鈕的行為不動）。kabby 自己跑在 port 3700，wepages 之後在任務 Terminal 按鈕上加一個 modal，讓使用者選「新開 cc（走 ai-terminal）」或「掛載 kabby session」。
+做一個叫 kabby 的新專案（位於 ``），跟 ai-terminal 完全獨立（ai-terminal 維持原樣，wepages 現有 Terminal 按鈕的行為不動）。kabby 自己跑在 port 3700，wepages 之後在任務 Terminal 按鈕上加一個 modal，讓使用者選「新開 cc（走 ai-terminal）」或「掛載 kabby session」。
 
 **設計決策已確認**
 
@@ -147,7 +147,7 @@
 {
   "id": "<uuid>",
   "name": "unity",
-  "cwd": "D:/Projects/RS/my-app/unity",
+  "cwd": "D:/Projects/my-app",
   "cmd": "claude.cmd" | null,
   "args": ["--dangerously-skip-permissions"] | null,
   "createdAt": "<iso>",
@@ -181,7 +181,7 @@
 
 ```
 D:\Git\kabby                → D--Git-kabby
-D:\Projects\RS\my-app        → D--Projects-RS-my-app       ← 底線也換
+D:\Projects\my-app        → D--Projects-my-app       ← 底線也換
 D:\Git\claude-code-2.1.88   → D--Git-claude-code-2-1-88  ← 點號也換
 ```
 
@@ -218,9 +218,9 @@ D:\Git\claude-code-2.1.88   → D--Git-claude-code-2-1-88  ← 點號也換
 
 | 檔案 | 改動 |
 |---|---|
-| `D:\Dev\Program\wepages\web\templates\task\detail.html` | 原本 `openTaskTerminal()`（line 391-423）改成先開選擇 modal；新增 modal HTML（仿照 dispatch modal line 305-345 的中央彈窗風格） |
+| `<wepages 專案>\web\templates\task\detail.html` | 原本 `openTaskTerminal()`（line 391-423）改成先開選擇 modal；新增 modal HTML（仿照 dispatch modal line 305-345 的中央彈窗風格） |
 | 同檔 inline `<script>` | modal 選擇邏輯：選「新 cc」→ 維持原行為設 iframe.src 指向 3600；選「attach kabby」→ 先 `fetch('http://localhost:3700/api/sessions')`，列出，使用者點選 → iframe.src 設為 `http://localhost:3700/embed.html?session=<id>` |
-| `D:\Dev\Program\wepages\web\static\css\task.css` | 新 modal 樣式（可抄 dispatch modal 風格） |
+| `<wepages 專案>\web\static\css\task.css` | 新 modal 樣式（可抄 dispatch modal 風格） |
 
 **綁定記憶**：使用者點過一次 attach 後，記在 `localStorage[`task-${id}-kabby`] = sessionId`。下次點 Terminal 直接跳過 modal 自動 attach（modal 上提供「換 session」按鈕可重選）。v1 不動 wepages DB schema。
 
@@ -237,7 +237,7 @@ D:\Git\claude-code-2.1.88   → D--Git-claude-code-2-1-88  ← 點號也換
 │  選中後 →                            │
 │  ┌─────────────────────────────────┐ │
 │  │ ○ unity (D:\Projects\...) 2 clt  │ │
-│  │ ○ rs    (D:\Projects\RS\...)     │ │
+│  │ ○ rs    (D:\Projects\...)     │ │
 │  └─────────────────────────────────┘ │
 │                          [取消][確認] │
 └───────────────────────────────────────┘
@@ -266,7 +266,7 @@ D:\Git\claude-code-2.1.88   → D--Git-claude-code-2-1-88  ← 點號也換
 
 | 檔案 | 改動 |
 |---|---|
-| `D:\Dev\Program\wepages\web\templates\task\detail.html` | 子清單項目（line 146-203 區域的 `.checklist-item`）加「→ 發送到 kabby」按鈕或長按事件 |
+| `<wepages 專案>\web\templates\task\detail.html` | 子清單項目（line 146-203 區域的 `.checklist-item`）加「→ 發送到 kabby」按鈕或長按事件 |
 | 同檔 inline `<script>` | 點擊時 `fetch('http://localhost:3700/api/sessions/<bound-id>/input', {method:'POST', body:JSON.stringify({data: "...\\r"})})` |
 
 **綁定來源**：直接讀 Phase 3 寫在 localStorage 的 `task-${id}-kabby`。沒綁過 → 跳出提示「請先在 Terminal 掛載 kabby session」。
@@ -295,34 +295,34 @@ D:\Git\claude-code-2.1.88   → D--Git-claude-code-2-1-88  ← 點號也換
 
 ## 關鍵檔案
 
-**新建（kabby 專案，路徑為 `D:\Git\kabby\`）**
-- `D:\Git\kabby\package.json`
-- `D:\Git\kabby\src\daemon.js`
-- `D:\Git\kabby\src\session.js`
-- `D:\Git\kabby\src\registry.js`
-- `D:\Git\kabby\src\ring-buffer.js`
-- `D:\Git\kabby\src\profile-store.js`  *(Phase 2.5)*
-- `D:\Git\kabby\src\cc-history.js`  *(Phase 2.5)*
-- `D:\Git\kabby\public\index.html`
-- `D:\Git\kabby\public\embed.html`
-- `D:\Git\kabby\public\app.js`
-- `D:\Git\kabby\public\embed.js`
+**新建（kabby 專案，路徑為 ``）**
+- `package.json`
+- `src\daemon.js`
+- `src\session.js`
+- `src\registry.js`
+- `src\ring-buffer.js`
+- `src\profile-store.js`  *(Phase 2.5)*
+- `src\cc-history.js`  *(Phase 2.5)*
+- `public\index.html`
+- `public\embed.html`
+- `public\app.js`
+- `public\embed.js`
 
 **User-level（不入 repo）**
 - `~/.kabby/profiles.json` — Phase 2.5 項目清單
 
 **可參考重用（不修改，位於 ai-terminal 原處）**
-- `D:\Git\aiterm-repo\class\ai-terminal\tool\src\session-manager.js:61-85` — node-pty spawn cc 的寫法
-- `D:\Git\aiterm-repo\class\ai-terminal\tool\src\index.js:43-109` — WS 接 PTY 的訊息格式（input/output/resize/exit JSON）
-- `D:\Git\aiterm-repo\class\ai-terminal\tool\public\index.html` — xterm.js + FitAddon + 自動重連模板
-- 上述三檔已 copy 至 `D:\Git\kabby\reference\from-ai-terminal\` 跨機器可移植
+- `<ai-terminal 專案>\src\session-manager.js:61-85` — node-pty spawn cc 的寫法
+- `<ai-terminal 專案>\src\index.js:43-109` — WS 接 PTY 的訊息格式（input/output/resize/exit JSON）
+- `<ai-terminal 專案>\public\index.html` — xterm.js + FitAddon + 自動重連模板
+- 上述三檔已 copy 至 `reference\from-ai-terminal\` 跨機器可移植
 
 **修改（wepages，Phase 3-4）**
-- `D:\Dev\Program\wepages\web\templates\task\detail.html`（modal HTML、Terminal 按鈕邏輯、子清單點擊）
-- `D:\Dev\Program\wepages\web\static\css\task.css`（modal 樣式）
+- `<wepages 專案>\web\templates\task\detail.html`（modal HTML、Terminal 按鈕邏輯、子清單點擊）
+- `<wepages 專案>\web\static\css\task.css`（modal 樣式）
 
 **外部相依（Phase 2.5）**
-- `D:\Git\temp\sessionHistory\Claude.Code.History.Viewer_1.12.0_x64-portable\claude-code-history-viewer.exe` — 透過 env `KABBY_VIEWER_PATH` 配置
+- `<history-viewer.exe 的絕對路徑>` — 透過 env `KABBY_VIEWER_PATH` 配置
 
 ---
 
