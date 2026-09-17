@@ -12,6 +12,12 @@
 
 ![kabby Web UI — 多 tab、左側項目/Running 清單、右上 Live 面板與監控入口](docs/images/screenshot.png)
 
+<div align="center">
+
+[English](./README.en.md) · **繁體中文** · [简体中文](./README.zh-CN.md)
+
+</div>
+
 ## What is Kabby
 
 一般在終端開 Claude Code，cc 的生命週期是綁在那個終端視窗上的：視窗關了、SSH 斷了，session 就沒了；想換一台裝置接手，只能重開一個新的 cc。
