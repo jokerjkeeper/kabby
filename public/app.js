@@ -57,11 +57,11 @@
       const el = newSessionTargetEl();
       if (!el) return {};
       const cell = measureCell();
-      const cs = getComputedStyle(el);
-      let availW = parseFloat(cs.width) || 0;
-      let availH = parseFloat(cs.height) || 0;
-      // 量到的若不是 pane 本身（例如整個 tab 容器），要先扣掉 pane 的 padding/border
-      if (!el.classList.contains('term-pane')) { availW -= PANE_CHROME * 2; availH -= PANE_CHROME * 2; }
+      // clientWidth/Height 是 padding box（不含 border），再扣掉 pane 的 padding+border
+      // 才是 xterm 真正能畫的區域。不要用 getComputedStyle().width/height：Chrome 在
+      // box-sizing:border-box 下回傳 border box，會多算一列一欄。
+      let availW = (el.clientWidth || 0) - PANE_CHROME * 2;
+      let availH = (el.clientHeight || 0) - PANE_CHROME * 2;
       availW -= TERM_SCROLLBAR_W;
       const cols = Math.floor(availW / cell.w);
       const rows = Math.floor(availH / cell.h);
@@ -667,7 +667,7 @@
     el.addEventListener('mousedown', () => focusLeaf(paneId));
 
     const leaf = { kind: 'leaf', paneId, el, sessionId: sessionId || null, info: info || null,
-                   term: null, fit: null, ws: null, connected: false, _ph: null };
+                   term: null, fit: null, host: null, ws: null, connected: false, _ph: null };
     leaves.set(paneId, leaf);
     if (sessionId) wireLeafTerminal(leaf);
     else showEmptyPlaceholder(leaf);
@@ -706,7 +706,14 @@
     });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
-    term.open(leaf.el);
+    // 掛在無 padding 的 .term-host 上：FitAddon 以 parent 的 getComputedStyle().height
+    // 取可用高度，而 Chrome 在 box-sizing:border-box 下回傳的是 border box
+    // （含 padding+border），直接掛 .term-pane 會多算一列一欄而被 overflow 裁掉。
+    const host = document.createElement('div');
+    host.className = 'term-host';
+    leaf.el.appendChild(host);
+    term.open(host);
+    leaf.host = host;
     leaf.term = term;
     leaf.fit = fit;
     term.onData((data) => {
@@ -728,7 +735,8 @@
     leaf._fitRaf = requestAnimationFrame(() => {
       leaf._fitRaf = null;
       if (!leaf.term || !leaf.fit) return;
-      if (leaf.el.clientWidth <= 0 || leaf.el.clientHeight <= 0) return;
+      const box = leaf.host || leaf.el;
+      if (box.clientWidth <= 0 || box.clientHeight <= 0) return;
       try { leaf.fit.fit(); } catch {}
       try { leaf.term.refresh(0, leaf.term.rows - 1); } catch {}
       sendResize(leaf);
