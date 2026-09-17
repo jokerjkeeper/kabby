@@ -288,126 +288,31 @@
     else if (term) { term.scrollToBottom(); updateScrollIndicator(); }
   });
 
-  // ── 乾淨版對話記錄（讀對話存檔，獨立捲動，8 秒自動刷新）──
-  const convoBtn = document.getElementById('convo-btn');
-  const convoPanel = document.getElementById('convo-panel');
-  const convoBody = document.getElementById('convo-body');
-  const convoStatus = document.getElementById('convo-status');
-  let convoTimer = null;
-
-  function convoFmtTs(ts) {
-    if (!ts) return '';
-    try { return new Date(ts).toLocaleString('zh-TW', { hour12: false }); } catch { return ''; }
-  }
-
-  // 輕量 Markdown 渲染（助理訊息用）。先整段 escapeHtml 再轉換 → 無 HTML 注入疑慮。
-  // 支援：```圍欄程式碼、`行內碼`、**粗體**、# 標題、-/數字清單、> 引用、--- 分隔線、連結
-  function mdInline(s) {   // s 已 escape
-    return s
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  }
-  function mdBlock(raw) {
-    const lines = escapeHtml(raw).split('\n');
-    const html = [];
-    let list = null;   // 'ul' | 'ol'
-    let para = [];
-    const closeList = () => { if (list) { html.push(`</${list}>`); list = null; } };
-    const flushPara = () => {
-      if (para.length) { html.push('<p>' + para.map(mdInline).join('<br>') + '</p>'); para = []; }
-    };
-    for (const line of lines) {
-      if (/^\s*$/.test(line)) { flushPara(); closeList(); continue; }
-      const h = line.match(/^(#{1,4})\s+(.*)$/);
-      if (h) { flushPara(); closeList(); html.push(`<div class="md-h md-h${h[1].length}">${mdInline(h[2])}</div>`); continue; }
-      if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { flushPara(); closeList(); html.push('<hr class="md-hr">'); continue; }
-      const ul = line.match(/^\s*[-*]\s+(.*)$/);
-      const ol = line.match(/^\s*\d+[.、)]\s+(.*)$/);
-      if (ul || ol) {
-        flushPara();
-        const want = ul ? 'ul' : 'ol';
-        if (list !== want) { closeList(); html.push(`<${want} class="md-list">`); list = want; }
-        html.push('<li>' + mdInline((ul || ol)[1]) + '</li>');
-        continue;
-      }
-      const bq = line.match(/^\s*&gt;\s?(.*)$/);   // 已 escape，'>' 是 &gt;
-      if (bq) { flushPara(); closeList(); html.push(`<div class="md-bq">${mdInline(bq[1])}</div>`); continue; }
-      closeList();
-      para.push(line);
-    }
-    flushPara(); closeList();
-    return html.join('');
-  }
-  function renderMarkdown(src) {
-    const parts = String(src).split(/```/);   // 奇數段 = 圍欄程式碼
-    return parts.map((part, i) => {
-      if (i % 2 === 0) return mdBlock(part);
-      let code = part;
-      const nl = code.indexOf('\n');
-      if (nl >= 0 && /^[\w+#.-]*\s*$/.test(code.slice(0, nl))) code = code.slice(nl + 1);   // 去掉語言標記行
-      return `<pre class="md-code">${escapeHtml(code.replace(/\n$/, ''))}</pre>`;
-    }).join('');
-  }
-
-  async function convoRefresh() {
-    if (!joinInfo) return;
-    convoStatus.textContent = '載入中…';
-    let data;
-    try {
+  // ── 乾淨版對話記錄（邏輯集中在共用的 convo-view.js）──
+  const convoView = window.createConvoView({
+    elements: {
+      panel: document.getElementById('convo-panel'),
+      body: document.getElementById('convo-body'),
+      status: document.getElementById('convo-status'),
+      search: document.getElementById('convo-search'),
+      toolsToggle: document.getElementById('convo-tools-toggle'),
+      readerToggle: document.getElementById('convo-reader-toggle'),
+      closeBtn: document.getElementById('convo-close'),
+      refreshBtn: document.getElementById('convo-refresh'),
+      exportMdBtn: document.getElementById('convo-export-md'),
+      exportHtmlBtn: document.getElementById('convo-export-html'),
+      triggerBtn: document.getElementById('convo-btn'),
+    },
+    onToast: showToast,
+    fetchTurns: async () => {
+      if (!joinInfo) throw new Error('尚未入房');
       const res = await fetch('/api/rooms/guest/conversation?ticket=' + encodeURIComponent(joinInfo.ticket));
-      data = await res.json();
+      const data = await res.json();
       if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
-    } catch (err) {
-      convoStatus.textContent = '載入失敗：' + err.message;
-      return;
-    }
-    // 過濾空白輪次（純工具呼叫、沒有文字的 assistant 輪）
-    const turns = (data.turns || []).filter((t) => t.text && t.text.trim());
-    // 刷新前貼底 → 刷新後跟著貼底；使用者捲上去看舊的 → 保持位置不打擾
-    const stick = convoBody.scrollTop + convoBody.clientHeight >= convoBody.scrollHeight - 30;
-    if (!turns.length) {
-      convoBody.innerHTML = `<div class="cv-empty">${
-        data.unsupported ? '這個 provider 尚未支援對話記錄。'
-        : data.notFound ? '還沒找到這個 session 的對話存檔。<br>對話開始後（第一則訊息送出後）再按「刷新」。'
-        : '目前沒有對話內容。'}</div>`;
-      convoStatus.textContent = '';
-      return;
-    }
-    convoBody.innerHTML = turns.map((t) => {
-      const model = t.model ? `<span class="cv-model">${escapeHtml(t.model)}</span>` : '';
-      // 助理訊息 Markdown 渲染；使用者訊息保持原文（pre-wrap）
-      const body = t.role === 'assistant'
-        ? `<div class="cv-text md">${renderMarkdown(t.text)}</div>`
-        : `<div class="cv-text">${escapeHtml(t.text)}</div>`;
-      return `<div class="cv-turn ${escapeHtml(t.role)}">
-        <div class="cv-role"><span>${t.role === 'user' ? '👤 USER' : '🤖 ASSISTANT'}</span>${model}<span class="cv-ts">${convoFmtTs(t.ts)}</span></div>
-        ${body}
-      </div>`;
-    }).join('');
-    convoStatus.textContent = `${turns.length} 則 · 自動刷新中`;
-    if (stick) convoBody.scrollTop = convoBody.scrollHeight;
-  }
-
-  function setConvoOpen(open) {
-    convoPanel.classList.toggle('visible', open);
-    convoBtn.classList.toggle('on', open);
-    if (open) {
-      convoBody.innerHTML = '';
-      convoRefresh().then(() => { convoBody.scrollTop = convoBody.scrollHeight; });
-      if (!convoTimer) convoTimer = setInterval(convoRefresh, 8000);
-    } else if (convoTimer) {
-      clearInterval(convoTimer);
-      convoTimer = null;
-    }
-  }
-  convoBtn.addEventListener('click', () => setConvoOpen(!convoPanel.classList.contains('visible')));
-  document.getElementById('convo-close').addEventListener('click', () => setConvoOpen(false));
-  document.getElementById('convo-refresh').addEventListener('click', convoRefresh);
-  convoPanel.addEventListener('click', (e) => { if (e.target === convoPanel) setConvoOpen(false); });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && convoPanel.classList.contains('visible')) setConvoOpen(false);
+      return data;
+    },
   });
+  document.getElementById('convo-btn').addEventListener('click', () => convoView.toggle());
 
   function setAllowWrite(v, silent) {
     allowWrite = !!v;
@@ -497,7 +402,7 @@
         break;
       case 'room-closed':
         closedByServer = true;
-        setConvoOpen(false);
+        convoView.close();
         try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
         showJoinForm(msg.reason === 'session-exit'
           ? '綁定的 session 已結束，聊天室已關閉。'

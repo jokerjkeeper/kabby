@@ -1008,6 +1008,44 @@
     leafLiveSync();
   }
 
+  // ── 房主：當前焦點 session 的乾淨版對話記錄（共用 convo-view.js，不必開房）──
+  let hostConvoSid = null;
+  let hostConvoProvider = 'claude';
+  const hostConvoView = window.createConvoView({
+    elements: {
+      panel: document.getElementById('convo-panel'),
+      body: document.getElementById('convo-body'),
+      status: document.getElementById('convo-status'),
+      search: document.getElementById('convo-search'),
+      toolsToggle: document.getElementById('convo-tools-toggle'),
+      readerToggle: document.getElementById('convo-reader-toggle'),
+      closeBtn: document.getElementById('convo-close'),
+      refreshBtn: document.getElementById('convo-refresh'),
+      exportMdBtn: document.getElementById('convo-export-md'),
+      exportHtmlBtn: document.getElementById('convo-export-html'),
+      triggerBtn: document.getElementById('host-convo-btn'),
+    },
+    onToast: showToast,
+    fetchTurns: async () => {
+      if (!hostConvoSid) throw new Error('沒有選定的 session');
+      const r = await apiFetch('/api/sessions/' + encodeURIComponent(hostConvoSid)
+        + '/conversation?provider=' + encodeURIComponent(hostConvoProvider || 'claude'));
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+      return data;
+    },
+  });
+  const hostConvoBtn = document.getElementById('host-convo-btn');
+  if (hostConvoBtn) hostConvoBtn.addEventListener('click', () => {
+    if (hostConvoView.isOpen()) { hostConvoView.close(); return; }
+    const leaf = leaves.get(focusedPaneId);
+    const sid = leaf && leaf.sessionId ? leaf.sessionId : null;
+    if (!sid) { showToast('先 attach 一個 session 再看對話記錄', 'warn'); return; }
+    hostConvoSid = sid;
+    hostConvoProvider = (leaf.info && leaf.info.provider) || 'claude';
+    hostConvoView.open();
+  });
+
   // 左右(row) / 上下(col) 分割焦點 pane
   function splitFocused(dir) {
     const tab = activeTab();

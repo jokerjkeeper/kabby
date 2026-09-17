@@ -27,7 +27,7 @@ const {
   listSessionFiles,
   isInjectedContext,
 } = require('./codex-history');
-const { normalizeCwd, stripTags, shorten } = require('./cc-history');
+const { normalizeCwd, stripTags, stripTagsKeepLines, shorten } = require('./cc-history');
 
 const STORE_FILE = 'usage-index-codex.json';
 const NEWLINE = 0x0a;
@@ -380,13 +380,27 @@ function readConversation(sessionId) {
       if (!obj) return;
       const p = obj.payload || {};
       if (obj.type === 'turn_context' && p.model) { model = p.model; return; }
+      // 工具呼叫是獨立的 response_item（非 event_msg）→ 掛到「上一則 assistant 輪」（下決策的那輪）；
+      // 若前面還沒有 assistant 輪則自建一個純工具輪。
+      if (obj.type === 'response_item') {
+        let tool = null;
+        if (p.type === 'function_call') tool = { name: p.name || 'tool', hint: toolHintFromArgs(p.arguments) };
+        else if (p.type === 'custom_tool_call') tool = { name: p.name || 'tool', hint: toolHintFromArgs(p.input) };
+        else if (p.type === 'web_search_call') tool = { name: 'web_search', hint: '' };
+        if (tool) {
+          const last = turns[turns.length - 1];
+          if (last && last.role === 'assistant') last.tools.push(tool);
+          else turns.push({ ts: obj.timestamp || null, role: 'assistant', text: '', model, tools: [tool] });
+        }
+        return;
+      }
       if (obj.type !== 'event_msg') return;
       if (p.type === 'user_message') {
-        const text = stripTags(eventText(p));
+        const text = stripTagsKeepLines(eventText(p));
         if (text && !isInjectedContext(text)) turns.push({ ts: obj.timestamp || null, role: 'user', text });
       } else if (p.type === 'agent_message') {
-        const text = stripTags(eventText(p));
-        if (text) turns.push({ ts: obj.timestamp || null, role: 'assistant', text, model });
+        const text = stripTagsKeepLines(eventText(p));
+        if (text) turns.push({ ts: obj.timestamp || null, role: 'assistant', text, model, tools: [] });
       }
     });
     rl.on('close', () => resolve({ sessionId, file, turns }));

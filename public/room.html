@@ -130,6 +130,35 @@
     .cv-text.md hr.md-hr { border: 0; border-top: 1px solid #3a3a3a; margin: 10px 0; }
     .cv-text.md strong { color: #f0f0f0; }
     .cv-text.md a { color: #4ec9b0; }
+    /* Markdown 表格 */
+    .cv-text.md .md-table {
+      border-collapse: collapse; margin: 8px 0; font-size: 12px;
+      display: block; max-width: 100%; overflow-x: auto;
+    }
+    .cv-text.md .md-table th, .cv-text.md .md-table td {
+      border: 1px solid #3a3a3a; padding: 5px 10px; text-align: left; vertical-align: top;
+    }
+    .cv-text.md .md-table th { background: #2a2a2a; color: #f0f0f0; font-weight: 600; }
+    .cv-text.md .md-table tbody tr:nth-child(even) td { background: #232324; }
+    /* 工具呼叫 chip */
+    .cv-tools { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .cv-tool {
+      font-size: 11px; background: #2a2620; border: 1px solid #4a3f2d; color: #d8c39a;
+      border-radius: 4px; padding: 2px 8px; display: inline-flex; gap: 6px; align-items: baseline;
+      max-width: 100%; overflow: hidden;
+    }
+    .cv-tool .cv-tool-hint { color: #8f8272; font-family: 'Cascadia Code', Consolas, monospace; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+    /* 搜尋高亮 */
+    mark.cv-hit { background: #6b5a1d; color: #ffe89a; border-radius: 2px; padding: 0 1px; }
+    /* 標題列控制項 */
+    #convo-search {
+      background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 4px; color: #d4d4d4;
+      font-size: 12px; padding: 4px 10px; width: 180px; outline: none;
+    }
+    #convo-search:focus { border-color: #4ec9b0; }
+    #convo-tools-toggle.on { background: #4a3f2d !important; color: #ffd97a; }
+    #convo-tools-toggle.disabled { opacity: .4; pointer-events: none; }
+    #convo-reader-toggle.on { background: #2d3f4a !important; color: #9fd7ff; }
     .cv-empty { color: #777; text-align: center; padding: 40px 20px; line-height: 1.8; }
     #convo-btn.on { background: #2d5a4a; color: #cdebdf; }
 
@@ -298,6 +327,11 @@
         <span class="t">📜 對話記錄</span>
         <span class="sub" id="convo-status"></span>
         <span class="spacer"></span>
+        <input id="convo-search" type="search" placeholder="🔍 搜尋…" autocomplete="off" />
+        <button class="btn" id="convo-reader-toggle" style="background:#3c3c3c; padding:4px 12px" title="簡潔模式：只顯示結論，隱藏過場與工具細節（適合非技術讀者）">📖 簡潔</button>
+        <button class="btn" id="convo-tools-toggle" style="background:#3c3c3c; padding:4px 12px" title="顯示 / 隱藏工具呼叫（Edit / Bash / Read…）">🔧 工具</button>
+        <button class="btn" id="convo-export-md" style="background:#3c3c3c; padding:4px 12px" title="下載為 Markdown">⬇ MD</button>
+        <button class="btn" id="convo-export-html" style="background:#3c3c3c; padding:4px 12px" title="下載為 HTML">⬇ HTML</button>
         <button class="btn" id="convo-refresh" style="background:#3c3c3c; padding:4px 12px">刷新</button>
         <button class="btn" id="convo-close" style="background:#3c3c3c; padding:4px 12px">× 關閉</button>
       </div>
@@ -325,6 +359,7 @@
   <div id="toast-host"></div>
 
   <script src="https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+  <script src="/convo-view.js"></script>
   <script src="/room.js"></script>
 </body>
 </html>

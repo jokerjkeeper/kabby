@@ -534,6 +534,96 @@
     }
     #help-btn { font-weight: bold; font-size: 13px; min-width: 22px; line-height: 18px; padding: 0 6px; }
 
+    /* ── 乾淨版對話記錄（房主；樣式與訪客 room.html 同套，由共用 convo-view.js 驅動）── */
+    #convo-panel {
+      position: fixed; inset: 0; z-index: 150;
+      background: rgba(0,0,0,0.6);
+      display: none; align-items: center; justify-content: center;
+    }
+    #convo-panel.visible { display: flex; }
+    #convo-box {
+      width: min(960px, 94vw); height: 88vh;
+      background: #1e1e1e; border: 1px solid #444; border-radius: 8px;
+      display: flex; flex-direction: column; overflow: hidden;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+    }
+    #convo-head {
+      flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+      padding: 10px 16px; background: #252526; border-bottom: 1px solid #333;
+    }
+    #convo-head .t { font-weight: 600; color: #f0f0f0; }
+    #convo-head .sub { color: #777; font-size: 11px; }
+    #convo-head .spacer { flex: 1; }
+    #convo-body { flex: 1; overflow-y: auto; padding: 12px 18px; }
+    .cv-turn { margin-bottom: 12px; max-width: 860px; }
+    .cv-role {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+      color: #888; margin-bottom: 3px; display: flex; gap: 8px; align-items: baseline;
+    }
+    .cv-turn.user .cv-role { color: #4ec9b0; }
+    .cv-turn.assistant .cv-role { color: #9cdcfe; }
+    .cv-role .cv-ts { color: #666; text-transform: none; letter-spacing: 0; }
+    .cv-role .cv-model { color: #666; text-transform: none; letter-spacing: 0; }
+    .cv-text {
+      white-space: pre-wrap; word-break: break-word; line-height: 1.55;
+      color: #d4d4d4; font-size: 13px;
+      background: #232324; border: 1px solid #2c2c2c; border-radius: 6px;
+      padding: 8px 12px;
+    }
+    .cv-turn.user .cv-text { background: #1d2b26; border-color: #2d4a3e; }
+    .cv-text.md { white-space: normal; }
+    .cv-text.md p { margin: 0 0 8px; }
+    .cv-text.md p:last-child { margin-bottom: 0; }
+    .cv-text.md code {
+      background: #1a1a1a; border: 1px solid #333; border-radius: 3px;
+      padding: 0 5px; font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; color: #dcdcaa;
+    }
+    .cv-text.md pre.md-code {
+      background: #161616; border: 1px solid #333; border-radius: 5px;
+      padding: 10px 12px; margin: 8px 0; overflow-x: auto;
+      font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; line-height: 1.5;
+      white-space: pre; color: #ce9178;
+    }
+    .cv-text.md .md-h { font-weight: 700; color: #f0f0f0; margin: 12px 0 6px; }
+    .cv-text.md .md-h1 { font-size: 17px; } .cv-text.md .md-h2 { font-size: 15px; }
+    .cv-text.md .md-h3 { font-size: 14px; } .cv-text.md .md-h4 { font-size: 13px; }
+    .cv-text.md .md-list { margin: 6px 0 8px; padding-left: 22px; }
+    .cv-text.md .md-list li { margin: 3px 0; }
+    .cv-text.md .md-bq {
+      border-left: 3px solid #4ec9b0; background: #212826;
+      padding: 4px 10px; margin: 6px 0; color: #b8ccc6;
+    }
+    .cv-text.md hr.md-hr { border: 0; border-top: 1px solid #3a3a3a; margin: 10px 0; }
+    .cv-text.md strong { color: #f0f0f0; }
+    .cv-text.md a { color: #4ec9b0; }
+    .cv-text.md .md-table {
+      border-collapse: collapse; margin: 8px 0; font-size: 12px;
+      display: block; max-width: 100%; overflow-x: auto;
+    }
+    .cv-text.md .md-table th, .cv-text.md .md-table td {
+      border: 1px solid #3a3a3a; padding: 5px 10px; text-align: left; vertical-align: top;
+    }
+    .cv-text.md .md-table th { background: #2a2a2a; color: #f0f0f0; font-weight: 600; }
+    .cv-text.md .md-table tbody tr:nth-child(even) td { background: #232324; }
+    .cv-tools { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .cv-tool {
+      font-size: 11px; background: #2a2620; border: 1px solid #4a3f2d; color: #d8c39a;
+      border-radius: 4px; padding: 2px 8px; display: inline-flex; gap: 6px; align-items: baseline;
+      max-width: 100%; overflow: hidden;
+    }
+    .cv-tool .cv-tool-hint { color: #8f8272; font-family: 'Cascadia Code', Consolas, monospace; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+    mark.cv-hit { background: #6b5a1d; color: #ffe89a; border-radius: 2px; padding: 0 1px; }
+    #convo-search {
+      background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 4px; color: #d4d4d4;
+      font-size: 12px; padding: 4px 10px; width: 180px; outline: none;
+    }
+    #convo-search:focus { border-color: #4ec9b0; }
+    #convo-tools-toggle.on { background: #4a3f2d !important; color: #ffd97a; }
+    #convo-tools-toggle.disabled { opacity: .4; pointer-events: none; }
+    #convo-reader-toggle.on { background: #2d3f4a !important; color: #9fd7ff; }
+    #host-convo-btn.on { background: #2d5a4a; color: #cdebdf; }
+    .cv-empty { color: #777; text-align: center; padding: 40px 20px; line-height: 1.8; }
+
     /* ── 監控頁（modal overlay）─────────────────────────────────────── */
     .modal.monitor {
       min-width: 0; width: 92vw; max-width: 1200px; height: 88vh;
@@ -812,6 +902,7 @@
       <div id="tab-empty">尚無已開啟的 tab — 從左側 sidebar 選 session attach</div>
       <span id="tab-hint">Ctrl+Shift+←/→ 切 tab · D/E 分割 · W 關 pane</span>
       <button class="btn tiny" id="leaflive-btn" title="在焦點 session 右上角顯示即時 token / spike 小面板" style="margin-right:6px">Live面板</button>
+      <button class="btn tiny" id="host-convo-btn" title="乾淨版對話記錄：讀當前焦點 session 的對話存檔（markdown / 搜尋 / 簡潔模式 / 匯出），不必開房" style="margin-right:6px">📜 對話記錄</button>
       <button class="btn tiny" id="room-btn" title="聊天室：建房綁 session，其他人用 key 進來看/操作終端 + 文字聊天" style="margin-right:6px">聊天室</button>
       <button class="btn tiny" id="monitor-btn" title="監控：token 用量 / 對話 / 敏感詞" style="margin-right:6px">監控</button>
       <button class="btn tiny" id="lock-btn" title="鎖定（清掉本機 token、需重新輸入；不會關閉任何 session）" style="display:none; margin-right:6px">鎖定</button>
@@ -1028,6 +1119,25 @@
     </div>
   </div>
 
+  <!-- 乾淨版對話記錄（房主；獨立大 modal，由共用 convo-view.js 驅動） -->
+  <div id="convo-panel">
+    <div id="convo-box">
+      <div id="convo-head">
+        <span class="t">📜 對話記錄</span>
+        <span class="sub" id="convo-status"></span>
+        <span class="spacer"></span>
+        <input id="convo-search" type="search" placeholder="🔍 搜尋…" autocomplete="off" />
+        <button class="btn" id="convo-reader-toggle" style="background:#3c3c3c; padding:4px 12px" title="簡潔模式：只顯示結論，隱藏過場與工具細節（適合非技術讀者）">📖 簡潔</button>
+        <button class="btn" id="convo-tools-toggle" style="background:#3c3c3c; padding:4px 12px" title="顯示 / 隱藏工具呼叫（Edit / Bash / Read…）">🔧 工具</button>
+        <button class="btn" id="convo-export-md" style="background:#3c3c3c; padding:4px 12px" title="下載為 Markdown">⬇ MD</button>
+        <button class="btn" id="convo-export-html" style="background:#3c3c3c; padding:4px 12px" title="下載為 HTML">⬇ HTML</button>
+        <button class="btn" id="convo-refresh" style="background:#3c3c3c; padding:4px 12px">刷新</button>
+        <button class="btn" id="convo-close" style="background:#3c3c3c; padding:4px 12px">× 關閉</button>
+      </div>
+      <div id="convo-body"></div>
+    </div>
+  </div>
+
   <!-- Modal: 監控（token 用量 / 對話 / 敏感詞，唯讀 pull 式） -->
   <div class="modal-backdrop" id="monitor-modal">
     <div class="modal monitor">
@@ -1085,6 +1195,7 @@
 
   <script src="https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js"></script>
   <script src="https://unpkg.com/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+  <script src="/convo-view.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

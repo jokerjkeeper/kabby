@@ -155,7 +155,18 @@ function extractText(content) {
 
 function stripTags(s) {
   // 把 <command-name>...</command-name>, <ide_opened_file>...</ide_opened_file> 之類包裹標籤去掉
+  // 注意：這版把換行也壓成空格（供 history 摘要/單行預覽用）。
   return s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+// 去標籤但「保留換行」——供完整對話記錄用（markdown 的標題/表格/清單靠換行才成立）。
+// 只收斂行尾空白與過多空行，不動行內縮排（程式碼區塊需要）。
+function stripTagsKeepLines(s) {
+  if (!s) return '';
+  return s.replace(/<[^>]+>/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function shorten(s, n) {
@@ -172,5 +183,6 @@ module.exports = {
   // 供 cc-collector 複用的文字解析 helper
   extractText,
   stripTags,
+  stripTagsKeepLines,
   shorten,
 };

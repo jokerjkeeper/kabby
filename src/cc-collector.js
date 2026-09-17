@@ -26,6 +26,7 @@ const {
   encodeCwd,
   extractText,
   stripTags,
+  stripTagsKeepLines,
   shorten,
 } = require('./cc-history');
 
@@ -386,6 +387,11 @@ function readConversation(sessionId) {
   if (!file) return Promise.resolve(null);
   return new Promise((resolve, reject) => {
     const turns = [];
+    // cc 把「同一個 assistant 回應」的 text block 與 tool_use block 拆成多個 JSONL 行
+    //（同一個 requestId）。若逐行各建一個 turn，動作前的 narration 會跟它的 tool_use 分家、
+    // 看起來像「純文字無工具」→ 簡潔模式抓不到。故依 requestId 合併：同一回應的 text 串接、
+    // 工具彙整到同一個 turn（與成本分析 analyzeSession 同款做法）。
+    const byReq = new Map();   // requestId → 該回應的 assistant turn（引用已在 turns 內）
     const stream = fs.createReadStream(file, { encoding: 'utf8' });
     const rl = readline.createInterface({ input: stream });
     rl.on('line', (line) => {
@@ -398,23 +404,37 @@ function readConversation(sessionId) {
       }
       if (!obj || !obj.message) return;
       if (obj.type === 'user') {
-        const text = stripTags(extractText(obj.message.content));
+        const text = stripTagsKeepLines(extractText(obj.message.content));
         if (text) turns.push({ ts: obj.timestamp || null, role: 'user', text });
       } else if (obj.type === 'assistant') {
-        const text = stripTags(extractText(obj.message.content));
-        const u = obj.message.usage || {};
-        turns.push({
-          ts: obj.timestamp || null,
-          role: 'assistant',
-          text,
-          model: obj.message.model || null,
-          tokens: {
-            input: u.input_tokens || 0,
-            output: u.output_tokens || 0,
-            cacheCreate: u.cache_creation_input_tokens || 0,
-            cacheRead: u.cache_read_input_tokens || 0,
-          },
-        });
+        const rid = obj.requestId || ('uuid:' + obj.uuid);
+        let r = byReq.get(rid);
+        if (!r) {
+          const u = obj.message.usage || {};
+          r = {
+            ts: obj.timestamp || null,
+            role: 'assistant',
+            text: '',
+            model: obj.message.model || null,
+            tools: [],
+            tokens: {
+              input: u.input_tokens || 0,
+              output: u.output_tokens || 0,
+              cacheCreate: u.cache_creation_input_tokens || 0,
+              cacheRead: u.cache_read_input_tokens || 0,
+            },
+          };
+          byReq.set(rid, r);
+          turns.push(r);   // 以「首次出現順序」入列，維持時間序
+        }
+        const t = stripTagsKeepLines(extractText(obj.message.content));
+        if (t) r.text = r.text ? (r.text + '\n\n' + t) : t;
+        if (Array.isArray(obj.message.content)) {
+          for (const b of obj.message.content) {
+            if (b && b.type === 'tool_use') r.tools.push({ name: b.name || 'tool', hint: toolHint(b.input) });
+          }
+        }
+        if (!r.model && obj.message.model) r.model = obj.message.model;
       }
     });
     rl.on('close', () => resolve({ sessionId, file, turns }));
