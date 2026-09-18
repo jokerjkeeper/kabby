@@ -26,7 +26,21 @@
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(termHost);
-  try { fit.fit(); } catch {}
+
+  // fit + 防最後一行被切：lineHeight 為小數時 xterm 以裝置像素進位行高，
+  // rows×實際行高可能比 fit 估的可用高度多幾 px，最後一行溢出被切掉 → rows-1
+  function fitTerm() {
+    try { fit.fit(); } catch {}
+    try {
+      const screen = term.element && term.element.querySelector('.xterm-screen');
+      if (screen) {
+        const availH = termHost.clientHeight - 8; // #term 上下 padding 各 4px
+        if (screen.offsetHeight > availH + 1 && term.rows > 5) term.resize(term.cols, term.rows - 1);
+      }
+    } catch {}
+  }
+
+  fitTerm();
 
   let ws = null;
   let reconnectTimer = null;
@@ -82,7 +96,7 @@
   });
 
   window.addEventListener('resize', () => {
-    try { fit.fit(); } catch {}
+    fitTerm();
     sendResize();
   });
 

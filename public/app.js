@@ -730,6 +730,20 @@
       if (!leaf.term || !leaf.fit) return;
       if (leaf.el.clientWidth <= 0 || leaf.el.clientHeight <= 0) return;
       try { leaf.fit.fit(); } catch {}
+      // 防最後一行被切：lineHeight 為小數時，xterm 以裝置像素進位每行高度，
+      // rows×實際行高可能比 FitAddon 估的可用高度多幾 px，最後一行就溢出被
+      // .term-pane 的 overflow:hidden 切掉。實測渲染高度若超出可用高度就 rows-1
+      // （寧可底部留幾 px 空白，也不切字）。
+      try {
+        const screen = leaf.term.element && leaf.term.element.querySelector('.xterm-screen');
+        if (screen) {
+          const PANE_PAD_V = 16; // .term-pane 上下 padding 各 8px（clientHeight 含 padding、不含 border）
+          const availH = leaf.el.clientHeight - PANE_PAD_V;
+          if (screen.offsetHeight > availH + 1 && leaf.term.rows > 5) {
+            leaf.term.resize(leaf.term.cols, leaf.term.rows - 1);
+          }
+        }
+      } catch {}
       try { leaf.term.refresh(0, leaf.term.rows - 1); } catch {}
       sendResize(leaf);
     });
