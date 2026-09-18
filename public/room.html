@@ -49,6 +49,21 @@
     #layout { flex: 1; display: flex; min-height: 0; }
     #term-side { flex: 1 1 auto; min-width: 0; position: relative; overflow: auto; background: #1e1e1e; padding: 4px; }
     #term-side .xterm { height: auto; }
+
+    /* 細線暗色捲軸：取代暗色介面裡的 Windows 預設粗灰捲軸（終端外層 + xterm viewport + 聊天/對話記錄） */
+    #term-side, #chat-msgs, #convo-body, .mention-pop, .xterm-viewport {
+      scrollbar-width: thin;
+      scrollbar-color: #4a4a4a transparent;
+    }
+    #term-side::-webkit-scrollbar, #chat-msgs::-webkit-scrollbar, #convo-body::-webkit-scrollbar,
+    .mention-pop::-webkit-scrollbar, .xterm-viewport::-webkit-scrollbar { width: 6px; height: 6px; }
+    #term-side::-webkit-scrollbar-track, #chat-msgs::-webkit-scrollbar-track, #convo-body::-webkit-scrollbar-track,
+    .mention-pop::-webkit-scrollbar-track, .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+    #term-side::-webkit-scrollbar-thumb, #chat-msgs::-webkit-scrollbar-thumb, #convo-body::-webkit-scrollbar-thumb,
+    .mention-pop::-webkit-scrollbar-thumb, .xterm-viewport::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 4px; }
+    #term-side::-webkit-scrollbar-thumb:hover, #chat-msgs::-webkit-scrollbar-thumb:hover, #convo-body::-webkit-scrollbar-thumb:hover,
+    .mention-pop::-webkit-scrollbar-thumb:hover, .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #6a6a6a; }
+    #term-side::-webkit-scrollbar-corner, .xterm-viewport::-webkit-scrollbar-corner { background: transparent; }
     /* 「回到最新」浮鈕：訪客往上捲（本地）時出現 */
     #scroll-latest {
       position: absolute; right: 18px; bottom: 14px; z-index: 20;

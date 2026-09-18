@@ -31,6 +31,12 @@
     #bar .info b { color: #f0f0f0; }
     #term { flex: 1; padding: 4px; min-height: 0; }
     #error { padding: 14px; color: #f48771; }
+    /* 細線暗色捲軸（取代 xterm viewport 的預設粗捲軸） */
+    #term, .xterm-viewport { scrollbar-width: thin; scrollbar-color: #4a4a4a transparent; }
+    #term::-webkit-scrollbar, .xterm-viewport::-webkit-scrollbar { width: 6px; height: 6px; }
+    #term::-webkit-scrollbar-track, .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+    #term::-webkit-scrollbar-thumb, .xterm-viewport::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 4px; }
+    #term::-webkit-scrollbar-thumb:hover, .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #6a6a6a; }
     #error.hidden { display: none; }
   </style>
 </head>
