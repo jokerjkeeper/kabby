@@ -189,11 +189,15 @@
     } else if (pref) {
       keyEl.value = pref;
     }
+    const urlNick = (params.get('nick') || '').trim().slice(0, 24); // 預填暱稱（WePages 帶入）
+    if (urlNick) nickEl.value = urlNick;
     const submit = () => submitJoin(keyEl, nickEl, document.getElementById('join-error'));
     document.getElementById('join-submit').addEventListener('click', submit);
     [keyEl, nickEl].forEach((el) =>
       el.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); }));
-    (keyEl.value ? nickEl : keyEl).focus();
+    // 已預填的欄位跳過，focus 第一個還沒填的
+    const focusEl = (keyEl.style.display !== 'none' && !keyEl.value) ? keyEl : (!nickEl.value ? nickEl : nickEl);
+    focusEl.focus();
   }
 
   async function submitJoin(keyEl, nickEl, errEl) {
@@ -211,11 +215,33 @@
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || ('HTTP ' + res.status));
+      json.invite = pendingInvite || null;   // 記住來源 invite，刷新時判斷是否同房
       joinInfo = json;
       try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(json)); } catch {}
       enterRoom();
     } catch (err) {
       errEl.textContent = err.message;
+    }
+  }
+
+  // WePages 整合：invite + nick → 自動進房（不顯示入房表單；失敗才退回表單）
+  async function autoJoin(invite, nickname) {
+    overlay.classList.add('hidden');   // 別閃一下入房表單
+    pendingInvite = invite;
+    try {
+      const res = await fetch('/api/rooms/join', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ invite, nickname }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || ('HTTP ' + res.status));
+      json.invite = invite;
+      joinInfo = json;
+      try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(json)); } catch {}
+      enterRoom();
+    } catch (err) {
+      showJoinForm('自動進房失敗：' + err.message);
     }
   }
 
@@ -587,13 +613,23 @@
   });
 
   (function boot() {
+    const params = new URLSearchParams(location.search);
+    const urlInvite = params.get('invite');
+    const urlNick = (params.get('nick') || '').trim().slice(0, 24);
     let saved = null;
     try { saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || 'null'); } catch {}
+    // 舊 ticket 若不屬於這個 invite（換了房 / 換了角色），丟棄，以新 invite 為準
+    if (saved && saved.ticket && urlInvite && saved.invite !== urlInvite) {
+      saved = null;
+      try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
+    }
     if (saved && saved.ticket) {
-      joinInfo = saved;      // 刷新頁面 → 用舊 ticket 直接重連
+      joinInfo = saved;               // 有效舊 ticket → 直接重連（優先，避免刷新 iframe 重複 join）
       enterRoom();
+    } else if (urlInvite && urlNick) {
+      autoJoin(urlInvite, urlNick);   // WePages：邀請碼 + 暱稱 → 自動進房
     } else {
-      showJoinForm();        // 統一用動態表單（含 ?key= 預填）
+      showJoinForm();                 // 動態表單（?invite / ?pw / ?key / ?nick 預填）
     }
   })();
 })();
