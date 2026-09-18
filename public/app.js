@@ -1358,7 +1358,8 @@
     if (!name) { pm.err.textContent = '請輸入項目名稱'; return; }
     if (!cwd) { pm.err.textContent = '請輸入工作目錄'; return; }
     const body = { name, cwd, provider: pm.provider.value || 'claude' };
-    if (pm.cmd.value.trim()) body.cmd = pm.cmd.value.trim();
+    // 一律送出 cmd（編輯時清空 → 送 null，後端才會真的清掉；啟動時會回退 provider 預設）
+    body.cmd = pm.cmd.value.trim() || null;
     const args = pm.args.value.trim() ? parseArgsRaw(pm.args.value) : [];
     body.args = args;
     pm.submit.disabled = true; pm.err.textContent = '';
