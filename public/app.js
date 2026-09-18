@@ -1568,6 +1568,7 @@
   const roomChatMsgsEl = document.getElementById('room-chat-msgs');
   const roomChatInputEl = document.getElementById('room-chat-input');
   const roomChatSendBtn = document.getElementById('room-chat-send');
+  const roomChatCloseBtn = document.getElementById('room-chat-close');
   const roomModal = document.getElementById('room-modal');
 
   // http（非 https）下 navigator.clipboard 不可用 → textarea + execCommand fallback
@@ -1715,10 +1716,7 @@
     rooms = Array.isArray(list) ? list : [];
     if (selectedRoomId && !rooms.some((r) => r.id === selectedRoomId)) {
       // 選中的房沒了（被關）→ 收掉聊天
-      roomChatDisconnect();
-      selectedRoomId = null;
-      roomChatTitleEl.textContent = '未選擇房間';
-      roomChatMsgsEl.innerHTML = '';
+      closeRoomChat();
     }
     renderRooms();
   }
@@ -1788,6 +1786,7 @@
   function selectRoom(id) {
     if (selectedRoomId === id) return;
     selectedRoomId = id;
+    roomChatCloseBtn.hidden = false;
     renderRooms();
     roomChatConnect(id);
   }
@@ -1804,6 +1803,17 @@
     setRoomChatEnabled(false);
     roomChatConnEl.textContent = '';
   }
+
+  // 關閉目前進入的聊天：斷線、回到「未選擇房間」＋房間列表（面板與房間本身都不受影響）
+  function closeRoomChat() {
+    roomChatDisconnect();
+    selectedRoomId = null;
+    roomChatTitleEl.textContent = '未選擇房間';
+    roomChatMsgsEl.innerHTML = '';
+    roomChatCloseBtn.hidden = true;
+    renderRooms();
+  }
+  roomChatCloseBtn.addEventListener('click', closeRoomChat);
 
   function roomChatConnect(roomId) {
     roomChatDisconnect();
