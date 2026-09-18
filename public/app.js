@@ -2049,7 +2049,14 @@
     });
   })();
 
-  roomModal.addEventListener('click', (e) => { if (e.target === roomModal) rmClose(); });
+  // backdrop 點擊關閉：只在 mousedown 與 click 都落在 backdrop 本身時才關，
+  // 避免在框內選字/拖曳、放開時滑到 backdrop（click target 變成 backdrop）而誤關視窗。
+  function closeOnBackdrop(el, closeFn) {
+    let downOnSelf = false;
+    el.addEventListener('mousedown', (e) => { downOnSelf = (e.target === el); });
+    el.addEventListener('click', (e) => { if (e.target === el && downOnSelf) closeFn(); });
+  }
+  closeOnBackdrop(roomModal, rmClose);
   document.addEventListener('keydown', (e) => {
     if (!roomModal.classList.contains('visible')) return;
     if (e.key === 'Escape') rmClose();
@@ -2476,7 +2483,7 @@
 
   // 「全部項目」modal 控制
   document.getElementById('ap-close').addEventListener('click', closeProjectsModal);
-  projectsModal.addEventListener('click', (e) => { if (e.target === projectsModal) closeProjectsModal(); });
+  closeOnBackdrop(projectsModal, closeProjectsModal);
   apGridBtn.addEventListener('click', () => setProjectsView('grid'));
   apListBtn.addEventListener('click', () => setProjectsView('list'));
   apSearchEl.addEventListener('input', renderProjectsModal);
