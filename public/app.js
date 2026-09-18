@@ -1588,9 +1588,10 @@
     } catch { return Promise.resolve(false); }
   }
 
-  function guestLink(room) {
-    return location.origin + '/room.html?key=' + encodeURIComponent(room.key);
+  function roleLink(pw) {
+    return location.origin + '/room.html?invite=' + encodeURIComponent(pw);
   }
+  const ROLE_LABEL = { master: '主', collab: '協作', guest: '訪客' };
 
   // ── 聊天共用：貼圖壓縮 / lightbox / @mention 渲染 ──
   // 圖片 → data URL：大圖用 canvas 縮到 1600px 內、轉 JPEG；gif 保留動圖（超限就拒收）
@@ -1731,47 +1732,75 @@
       const card = document.createElement('div');
       card.className = 'room-card' + (room.id === selectedRoomId ? ' selected' : '');
       const online = room.guests.filter((g) => g.online).length;
+      const roleDefs = [
+        { role: 'master', pass: 'masterPass', invite: 'masterInvite', label: '主', masked: true },
+        { role: 'collab', pass: 'collabPass', invite: 'collabInvite', label: '協作', masked: true, reveal: true },
+        { role: 'guest', pass: 'guestPass', invite: 'guestInvite', label: '訪客', masked: false },
+      ];
+      const passRows = roleDefs.filter((r) => room[r.pass]).map((r) => {
+        const shown = r.masked ? '••••••' : escapeHtml(room[r.pass]);
+        const revealBtn = r.reveal
+          ? ` <button class="btn tiny" data-reveal="${r.role}" title="輸入主密碼查看協作密碼">查看</button>` : '';
+        return `<div class="rc-meta">${r.label}密碼：<span class="rc-key" data-pass="${r.role}">${shown}</span>${revealBtn}
+           <button class="btn tiny" data-copy-invite="${escapeHtml(room[r.invite] || '')}" title="複製${r.label}入房連結">複製連結</button></div>`;
+      }).join('');
       card.innerHTML = `
         <div class="rc-name">
           <span>${escapeHtml(room.name)}</span>
           <span class="badge">${online}/${room.guests.length} 在線</span>
-          ${room.allowWrite ? '<span class="badge warn">可寫</span>' : ''}
+          ${room.frozen ? '<span class="badge warn">凍結</span>' : ''}
         </div>
         <div class="rc-meta">綁定：${escapeHtml(room.sessionName || room.sessionId.slice(0, 8))}</div>
-        <div class="rc-meta">key: <span class="rc-key">${escapeHtml(room.key)}</span></div>
+        ${passRows}
         <div class="rc-guests">${room.guests.map((g) =>
-          `<span class="rc-guest-chip ${g.online ? 'online' : ''}">${escapeHtml(g.nickname)}</span>`).join('') || '<span style="color:#666;font-size:10px">還沒有訪客</span>'}</div>
+          `<span class="rc-guest-chip ${g.online ? 'online' : ''}" title="角色：${ROLE_LABEL[g.role] || g.role}">${escapeHtml(g.nickname)}<span style="opacity:.6;font-size:9px"> ${ROLE_LABEL[g.role] || ''}</span></span>`).join('') || '<span style="color:#666;font-size:10px">還沒有訪客</span>'}</div>
         <div class="rc-actions">
-          <button class="btn tiny" data-action="copy-link" title="複製訪客入房連結（含 key）">複製連結</button>
-          <label class="rc-write-toggle" title="訪客可否在終端輸入（即時生效，伺服器端強制）">
-            <input type="checkbox" data-action="allow-write" ${room.allowWrite ? 'checked' : ''} /> 可輸入
+          <label class="rc-write-toggle" title="凍結全房輸入（協作者暫為唯讀；房主不受影響），即時生效、伺服器端強制">
+            <input type="checkbox" data-action="freeze" ${room.frozen ? 'checked' : ''} /> 凍結
           </label>
           <button class="btn danger tiny" data-action="close-room" style="margin-left:auto">關房</button>
         </div>
       `;
       card.addEventListener('click', () => selectRoom(room.id));
-      card.querySelector('[data-action="copy-link"]').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const ok = await copyText(guestLink(room));
-        showToast(ok ? '已複製訪客連結：' + guestLink(room) : '複製失敗，連結：' + guestLink(room), ok ? '' : 'warn');
+      // 複製分角色入房連結（用不透明邀請碼，URL 不含明文密碼）
+      card.querySelectorAll('[data-copy-invite]').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const token = btn.dataset.copyInvite;
+          if (!token) { showToast('此角色沒有邀請連結', 'warn'); return; }
+          const link = roleLink(token);
+          const ok = await copyText(link);
+          showToast((ok ? '已複製入房連結：' : '複製失敗，連結：') + link, ok ? '' : 'warn');
+        });
       });
-      const writeToggle = card.querySelector('[data-action="allow-write"]');
-      writeToggle.addEventListener('click', (e) => e.stopPropagation());
-      writeToggle.addEventListener('change', async (e) => {
+      // 揭示協作密碼：輸入主密碼驗證（面板本身已是房主專屬，這層是防旁人/螢幕分享偷看）
+      card.querySelectorAll('[data-reveal]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const cell = card.querySelector('[data-pass="' + btn.dataset.reveal + '"]');
+          if (!cell) return;
+          if (room.masterPass) {
+            const input = prompt('輸入主密碼以查看協作密碼：');
+            if (input == null) return;
+            if (input !== room.masterPass) { showToast('主密碼不正確', 'warn'); return; }
+          }
+          cell.textContent = room.collabPass;
+          btn.remove();
+        });
+      });
+      const freezeToggle = card.querySelector('[data-action="freeze"]');
+      freezeToggle.addEventListener('click', (e) => e.stopPropagation());
+      freezeToggle.addEventListener('change', async (e) => {
         e.stopPropagation();
-        const want = writeToggle.checked;
-        if (want && !confirm('開放訪客輸入 = 訪客能在這台機器的終端執行任意指令（用你的權限）。確定開放？')) {
-          writeToggle.checked = false;
-          return;
-        }
+        const want = freezeToggle.checked;
         try {
           await apiFetch('/api/rooms/' + encodeURIComponent(room.id), {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ allowWrite: want }),
+            body: JSON.stringify({ frozen: want }),
           });
           refreshRooms();
-        } catch { writeToggle.checked = !want; }
+        } catch { freezeToggle.checked = !want; }
       });
       card.querySelector('[data-action="close-room"]').addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -1900,8 +1929,10 @@
     modal: roomModal,
     session: document.getElementById('rm-session'),
     name: document.getElementById('rm-name'),
-    key: document.getElementById('rm-key'),
-    allowWrite: document.getElementById('rm-allow-write'),
+    master: document.getElementById('rm-master'),
+    collab: document.getElementById('rm-collab'),
+    guest: document.getElementById('rm-guest'),
+    frozen: document.getElementById('rm-frozen'),
     err: document.getElementById('rm-error'),
     submit: document.getElementById('rm-submit'),
   };
@@ -1912,20 +1943,31 @@
     rm.session.innerHTML = alive.map((s) =>
       `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}（${escapeHtml(shorten(s.cwd, 30))}）</option>`).join('');
     rm.name.value = '';
-    rm.key.value = '';
-    rm.allowWrite.checked = false;
+    rm.master.value = '';
+    rm.collab.value = '';
+    rm.guest.value = '';
+    rm.frozen.checked = false;
     rm.err.textContent = '';
     rm.modal.classList.add('visible');
-    setTimeout(() => rm.key.focus(), 50);
+    setTimeout(() => rm.master.focus(), 50);
   }
   function rmClose() { rm.modal.classList.remove('visible'); }
   async function rmSubmit() {
     const sessionId = rm.session.value;
     if (!sessionId) { rm.err.textContent = '請選擇 session'; return; }
-    const body = { sessionId, allowWrite: rm.allowWrite.checked };
+    const master = rm.master.value.trim();
+    const collab = rm.collab.value.trim();
+    const guest = rm.guest.value.trim();
+    if (!master && !collab && !guest) { rm.err.textContent = '至少要設定一組密碼（主 / 協作 / 訪客）'; return; }
+    if ((master && collab && master === collab) || (master && guest && master === guest) || (collab && guest && collab === guest)) {
+      rm.err.textContent = '三組密碼不可相同'; return;
+    }
+    if ((master || collab) && !confirm('主／協作密碼持有者能在這台機器的終端執行任意指令（用你的權限）。確定要開放？')) return;
+    const body = { sessionId, frozen: rm.frozen.checked };
     if (rm.name.value.trim()) body.name = rm.name.value.trim();
-    if (rm.key.value.trim()) body.key = rm.key.value.trim();
-    if (body.allowWrite && !confirm('開放訪客輸入 = 訪客能在這台機器的終端執行任意指令（用你的權限）。確定？')) return;
+    if (master) body.masterPass = master;
+    if (collab) body.collabPass = collab;
+    if (guest) body.guestPass = guest;
     rm.submit.disabled = true; rm.err.textContent = '';
     try {
       const res = await apiFetch('/api/rooms', {
@@ -1938,8 +1980,7 @@
       rmClose();
       await refreshRooms();
       selectRoom(json.id);
-      const ok = await copyText(guestLink(json));
-      showToast((ok ? '房間已建立，訪客連結已複製：' : '房間已建立，訪客連結：') + guestLink(json));
+      showToast('房間已建立。可在房間卡複製各角色的入房連結。');
     } catch (err) { rm.err.textContent = err.message; }
     finally { rm.submit.disabled = false; }
   }

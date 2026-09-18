@@ -77,27 +77,32 @@ app.post('/api/rooms/join', (req, res) => {
   if (rec && rec.resetAt > now && rec.count >= JOIN_FAIL_LIMIT) {
     return res.status(429).json({ error: '嘗試次數過多，請稍後再試' });
   }
-  const { key, nickname } = req.body || {};
-  if (!key || typeof key !== 'string') return res.status(400).json({ error: 'key 必填' });
-  const nick = (typeof nickname === 'string' ? nickname.trim() : '').slice(0, 24);
+  // 邀請碼（分享連結）或明文密碼（手動輸入）；相容舊欄位 key
+  const invite = (req.body && req.body.invite) || '';
+  const pw = (req.body && (req.body.password || req.body.key)) || '';
+  if (!invite && !pw) return res.status(400).json({ error: '密碼必填' });
+  const nick = (typeof (req.body && req.body.nickname) === 'string' ? req.body.nickname.trim() : '').slice(0, 24);
   if (!nick) return res.status(400).json({ error: '暱稱必填' });
 
-  const joined = roomRegistry.join(key.trim(), nick);
+  const joined = invite
+    ? roomRegistry.joinByInvite(String(invite).trim(), nick)
+    : roomRegistry.join(String(pw).trim(), nick);
   if (!joined) {
     const cur = rec && rec.resetAt > now ? rec : { count: 0, resetAt: now + JOIN_FAIL_WINDOW_MS };
     cur.count += 1;
     joinFails.set(ip, cur);
-    return res.status(404).json({ error: 'key 不正確或房間不存在' });
+    return res.status(404).json({ error: '密碼不正確或房間不存在' });
   }
   joinFails.delete(ip);
-  const { room, ticket } = joined;
+  const { room, ticket, role } = joined;
   res.json({
     ticket,
     roomId: room.id,
     roomName: room.name,
     sessionId: room.sessionId,
     sessionName: room.sessionName,
-    allowWrite: room.allowWrite,
+    role,
+    allowWrite: roomRegistry.effectiveWrite(role, room.frozen),
     nickname: nick,
   });
 });
@@ -335,7 +340,7 @@ app.get('/api/rooms', (req, res) => {
 });
 
 app.post('/api/rooms', (req, res) => {
-  const { name, key, sessionId, allowWrite } = req.body || {};
+  const { name, masterPass, collabPass, guestPass, sessionId, frozen } = req.body || {};
   const session = registry.get(sessionId) || registry.getByName(sessionId);
   if (!session || !session.alive) {
     return res.status(400).json({ error: '綁定的 session 不存在或已結束' });
@@ -343,10 +348,12 @@ app.post('/api/rooms', (req, res) => {
   try {
     const room = roomRegistry.create({
       name: name || `${session.name} 聊天室`,
-      key,
+      masterPass,
+      collabPass,
+      guestPass,
       sessionId: session.id,
       sessionName: session.name,
-      allowWrite,
+      frozen,
     });
     // session 結束（exit / 被殺）→ 連帶關房、通知所有成員
     session.on('exit', () => roomRegistry.closeForSession(session.id, 'session-exit'));
@@ -359,11 +366,9 @@ app.post('/api/rooms', (req, res) => {
 app.patch('/api/rooms/:id', (req, res) => {
   const room = roomRegistry.get(req.params.id);
   if (!room) return res.status(404).json({ error: 'not found' });
-  const { allowWrite } = req.body || {};
-  if (typeof allowWrite === 'boolean' && allowWrite !== room.allowWrite) {
-    room.allowWrite = allowWrite;
-    room.broadcast({ type: 'room-config', allowWrite });
-    roomSystemMsg(room, allowWrite ? '房主開放了終端輸入' : '房主改為唯讀模式');
+  const { frozen } = req.body || {};
+  if (typeof frozen === 'boolean' && frozen !== room.frozen) {
+    setRoomFrozen(room, frozen);
   }
   res.json(room.toJSON());
 });
@@ -590,6 +595,47 @@ function roomSystemMsg(room, text) {
   roomChat(room, { from: 'system', nickname: '', text });
 }
 
+// 切換全房凍結：更新狀態並依角色把「有效寫入權」推給每個在線訪客
+// （master 不受凍結影響、collab 凍結時變唯讀、guest 恆唯讀）。房主面板收到 frozen 狀態。
+function setRoomFrozen(room, frozen) {
+  room.frozen = !!frozen;
+  for (const g of room.guests.values()) {
+    if (g.ws && g.ws.readyState === g.ws.OPEN) {
+      g.ws.send(JSON.stringify({
+        type: 'room-config',
+        allowWrite: roomRegistry.effectiveWrite(g.role, room.frozen),
+        frozen: room.frozen,
+      }));
+    }
+  }
+  for (const ws of room.hostSockets) {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'room-config', frozen: room.frozen }));
+  }
+  roomSystemMsg(room, room.frozen ? '房主已凍結全房輸入（協作者暫為唯讀）' : '房主已解除凍結');
+}
+
+// 遠端房主（master ticket）房內全權：凍結 / 踢人 / 關房。ctx = { room, guest, ticket }
+function handleRoomAdmin(ctx, msg) {
+  const { room, ticket } = ctx;
+  const action = msg && msg.action;
+  if (action === 'freeze' || action === 'unfreeze') {
+    const want = action === 'freeze';
+    if (want !== room.frozen) setRoomFrozen(room, want);
+  } else if (action === 'kick' && typeof msg.ticket === 'string' && msg.ticket !== ticket) {
+    const target = room.guests.get(msg.ticket);
+    if (target) {
+      const nick = target.nickname;
+      roomRegistry.kick(room, msg.ticket);
+      if (!room.closed) {
+        room.broadcast({ type: 'room-presence', guests: room.presence() });
+        roomSystemMsg(room, `${nick} 已被房主移出聊天室`);
+      }
+    }
+  } else if (action === 'close') {
+    roomRegistry.destroy(room.id, 'host-closed');
+  }
+}
+
 // 房主聊天面板 WS：只收發聊天，不碰終端
 function handleRoomHostConnection(ws, room) {
   room.hostSockets.add(ws);
@@ -617,7 +663,14 @@ function handleConnection(ws, session, guestCtx) {
     guest.ws = ws;
     ws.send(JSON.stringify({
       type: 'room-init',
-      room: { id: room.id, name: room.name, allowWrite: room.allowWrite, sessionName: room.sessionName },
+      room: {
+        id: room.id,
+        name: room.name,
+        sessionName: room.sessionName,
+        frozen: room.frozen,
+        allowWrite: roomRegistry.effectiveWrite(guest.role, room.frozen),
+      },
+      role: guest.role,
       nickname: guest.nickname,
       chatLog: room.chatLog,
       guests: room.presence(),
@@ -630,14 +683,18 @@ function handleConnection(ws, session, guestCtx) {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (msg.type === 'input' && typeof msg.data === 'string') {
-      // 訪客輸入：唯讀房間直接丟棄（伺服器端強制，前端只是輔助 UI）
-      if (guestCtx && !guestCtx.room.allowWrite) return;
+      // 訪客輸入：依角色與凍結狀態放行（伺服器端強制，前端只是輔助 UI）
+      // master 一律可寫、collab 非凍結才可寫、guest 恆唯讀；本機房主(無 guestCtx)不受限
+      if (guestCtx && !roomRegistry.effectiveWrite(guestCtx.guest.role, guestCtx.room.frozen)) return;
       session.write(msg.data);
     } else if (msg.type === 'resize' && Number.isFinite(msg.cols) && Number.isFinite(msg.rows)) {
-      if (guestCtx) return;   // 訪客不許 resize（會弄亂房主畫面）
+      if (guestCtx) return;   // 訪客（含遠端房主）不許 resize（會弄亂本機房主畫面）
       session.resize(msg.cols, msg.rows);
     } else if (msg.type === 'chat' && guestCtx) {
       roomChat(guestCtx.room, { from: 'guest', nickname: guestCtx.guest.nickname, text: msg.text, image: msg.image });
+    } else if (msg.type === 'room-admin' && guestCtx && guestCtx.guest.role === 'master') {
+      // 遠端房主房內全權：凍結 / 踢人 / 關房
+      handleRoomAdmin(guestCtx, msg);
     }
   });
 

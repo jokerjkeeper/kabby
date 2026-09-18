@@ -11,6 +11,9 @@
   let ws = null;
   let term = null;
   let allowWrite = false;
+  let role = 'guest';       // 由 join / room-init 帶回：master | collab | guest
+  let roomFrozen = false;   // 房間層級凍結狀態（房主控制；跟本地「看自己畫面」的 frozen 不同）
+  let pendingInvite = null; // 分享連結帶的邀請碼（?invite=）；有它就不需手動輸密碼
   let reconnectTimer = null;
   let reconnectAttempts = 0;
   let closedByServer = false;
@@ -33,6 +36,10 @@
   const chatInputEl = document.getElementById('chat-input');
   const guestListEl = document.getElementById('guest-list');
   const guestCountEl = document.getElementById('guest-count');
+  const roleBadge = document.getElementById('role-badge');
+  const masterFreezeBtn = document.getElementById('master-freeze-btn');
+  const masterCloseBtn = document.getElementById('master-close-btn');
+  const ROLE_LABEL = { master: '房主', collab: '協作', guest: '訪客' };
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
@@ -158,9 +165,9 @@
     overlay.classList.remove('hidden');
     joinBox.innerHTML = `
       <h2>進入 kabby 聊天室</h2>
-      <div class="sub">輸入房主給你的 key 與你的暱稱</div>
+      <div class="sub">輸入房主給你的密碼與你的暱稱（密碼決定你的角色：房主／協作／訪客）</div>
       ${note ? `<div class="closed-note" style="margin-bottom:10px">${escapeHtml(note)}</div>` : ''}
-      <label for="join-key">聊天室 key</label>
+      <label for="join-key">密碼</label>
       <input id="join-key" type="text" autocomplete="off" spellcheck="false" />
       <label for="join-nick">暱稱</label>
       <input id="join-nick" type="text" maxlength="24" autocomplete="off" />
@@ -170,7 +177,18 @@
     const keyEl = document.getElementById('join-key');
     const nickEl = document.getElementById('join-nick');
     const params = new URLSearchParams(location.search);
-    if (params.get('key')) keyEl.value = params.get('key');
+    pendingInvite = params.get('invite') || null;
+    const pref = params.get('pw') || params.get('key'); // pw / key（相容舊連結，明文）
+    if (pendingInvite) {
+      // 邀請連結：不需手動輸密碼，藏掉密碼欄，只問暱稱
+      keyEl.style.display = 'none';
+      const lbl = joinBox.querySelector('label[for="join-key"]');
+      if (lbl) lbl.style.display = 'none';
+      const sub = joinBox.querySelector('.sub');
+      if (sub) sub.textContent = '你透過邀請連結進房，輸入暱稱即可。';
+    } else if (pref) {
+      keyEl.value = pref;
+    }
     const submit = () => submitJoin(keyEl, nickEl, document.getElementById('join-error'));
     document.getElementById('join-submit').addEventListener('click', submit);
     [keyEl, nickEl].forEach((el) =>
@@ -179,16 +197,17 @@
   }
 
   async function submitJoin(keyEl, nickEl, errEl) {
-    const key = keyEl.value.trim();
+    const password = keyEl.value.trim();
     const nickname = nickEl.value.trim();
-    if (!key) { errEl.textContent = '請輸入 key'; return; }
+    if (!pendingInvite && !password) { errEl.textContent = '請輸入密碼'; return; }
     if (!nickname) { errEl.textContent = '請輸入暱稱'; return; }
     errEl.textContent = '';
     try {
+      const body = pendingInvite ? { invite: pendingInvite, nickname } : { password, nickname };
       const res = await fetch('/api/rooms/join', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ key, nickname }),
+        body: JSON.stringify(body),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || ('HTTP ' + res.status));
@@ -215,6 +234,7 @@
     roomNameEl.textContent = joinInfo.roomName || '聊天室';
     sessionNameEl.textContent = joinInfo.sessionName ? `· ${joinInfo.sessionName}` : '';
     meNickEl.textContent = joinInfo.nickname;
+    applyRole(joinInfo.role || 'guest');
     setAllowWrite(!!joinInfo.allowWrite, true);
     if (!term) {
       term = new Terminal({
@@ -314,6 +334,31 @@
   });
   document.getElementById('convo-btn').addEventListener('click', () => convoView.toggle());
 
+  // 依角色更新 UI：角色徽章、房主工具列顯示、訪客名單踢人鈕
+  function applyRole(r) {
+    role = r || 'guest';
+    if (roleBadge) {
+      roleBadge.textContent = ROLE_LABEL[role] || role;
+      roleBadge.className = 'perm-badge ' + (role === 'master' ? 'rw' : 'ro');
+    }
+    const isMaster = role === 'master';
+    if (masterFreezeBtn) masterFreezeBtn.style.display = isMaster ? '' : 'none';
+    if (masterCloseBtn) masterCloseBtn.style.display = isMaster ? '' : 'none';
+    updateFreezeBtn();
+    renderGuests(knownGuests || []);   // 重繪以顯示/隱藏踢人鈕
+  }
+
+  function updateFreezeBtn() {
+    if (masterFreezeBtn) masterFreezeBtn.textContent = roomFrozen ? '🔥 解除凍結' : '🧊 凍結';
+  }
+
+  // 房主管理指令（凍結/踢人/關房）走終端 WS，伺服器只受理 master ticket
+  function sendRoomAdmin(action, extra) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(Object.assign({ type: 'room-admin', action }, extra || {})));
+    }
+  }
+
   function setAllowWrite(v, silent) {
     allowWrite = !!v;
     permBadge.className = 'perm-badge ' + (allowWrite ? 'rw' : 'ro');
@@ -382,9 +427,12 @@
         break;
       case 'room-init':
         reconnectAttempts = 0;
+        if (msg.role) applyRole(msg.role);
         if (msg.room) {
           roomNameEl.textContent = msg.room.name || '聊天室';
           sessionNameEl.textContent = msg.room.sessionName ? `· ${msg.room.sessionName}` : '';
+          roomFrozen = !!msg.room.frozen;
+          updateFreezeBtn();
           setAllowWrite(!!msg.room.allowWrite, true);
         }
         chatMsgsEl.innerHTML = '';
@@ -398,7 +446,8 @@
         renderGuests(msg.guests || []);
         break;
       case 'room-config':
-        setAllowWrite(!!msg.allowWrite);
+        if (typeof msg.frozen === 'boolean') { roomFrozen = msg.frozen; updateFreezeBtn(); }
+        if (typeof msg.allowWrite === 'boolean') setAllowWrite(msg.allowWrite);
         break;
       case 'room-closed':
         closedByServer = true;
@@ -461,9 +510,22 @@
   function renderGuests(guests) {
     knownGuests = guests;   // mention 候選同步更新
     guestCountEl.textContent = guests.length ? `${guests.filter((g) => g.online).length}/${guests.length} 在線` : '';
-    guestListEl.innerHTML = guests.map((g) =>
-      `<span class="guest-chip ${g.online ? 'online' : 'offline'}"><span class="dot">●</span>${escapeHtml(g.nickname)}</span>`
-    ).join('');
+    const myTicket = joinInfo && joinInfo.ticket;
+    guestListEl.innerHTML = guests.map((g) => {
+      const roleTag = g.role && g.role !== 'guest'
+        ? `<span style="opacity:.55;font-size:9px"> ${ROLE_LABEL[g.role] || g.role}</span>` : '';
+      const kick = (role === 'master' && g.ticket && g.ticket !== myTicket)
+        ? `<button data-kick="${escapeHtml(g.ticket)}" title="移出此人" style="margin-left:4px;border:0;background:transparent;color:#e06c6c;cursor:pointer;font-size:12px;line-height:1">×</button>` : '';
+      return `<span class="guest-chip ${g.online ? 'online' : 'offline'}"><span class="dot">●</span>${escapeHtml(g.nickname)}${roleTag}${kick}</span>`;
+    }).join('');
+    if (role === 'master') {
+      guestListEl.querySelectorAll('[data-kick]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (confirm('把這位成員移出聊天室？')) sendRoomAdmin('kick', { ticket: btn.dataset.kick });
+        });
+      });
+    }
   }
 
   // ── 綁事件 + boot ──
@@ -519,6 +581,10 @@
   })();
 
   document.getElementById('leave-btn').addEventListener('click', leaveRoom);
+  if (masterFreezeBtn) masterFreezeBtn.addEventListener('click', () => sendRoomAdmin(roomFrozen ? 'unfreeze' : 'freeze'));
+  if (masterCloseBtn) masterCloseBtn.addEventListener('click', () => {
+    if (confirm('關閉整個聊天室？所有人會被斷開。（綁定的 session 不受影響）')) sendRoomAdmin('close');
+  });
 
   (function boot() {
     let saved = null;

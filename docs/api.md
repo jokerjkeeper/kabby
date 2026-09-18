@@ -213,14 +213,22 @@ Request body：
 
 ## Rooms（聊天室）
 
-共享終端房間：房主建房綁一個 running session，訪客憑 key 入房看終端（可選開放輸入）+ 文字聊天。房間存記憶體，daemon 重啟 / 綁定 session 結束即關房。訪客頁：`/room.html`。
+共享終端房間：房主建房綁一個 running session（**一 session 至多一房**），其他人憑「密碼」入房。密碼決定角色：
+
+| 角色 | 密碼 | 看終端 | 寫終端 | 房間管理 |
+|---|---|---|---|---|
+| `master` 房主 | 主密碼 | ✅ | ✅（凍結時仍可寫） | 凍結 / 踢人 / 關房 |
+| `collab` 協作 | 協作密碼 | ✅ | ✅（`frozen=true` 時暫唯讀） | ❌ |
+| `guest` 訪客 | 訪客密碼 | ✅ | ❌ | ❌ |
+
+三組密碼建房時至少設一組、彼此不可相同、且**全域唯一**（憑密碼即可解析房+角色）。房間存記憶體，daemon 重啟 / 綁定 session 結束即關房。訪客頁：`/room.html`。本機 `AUTH_TOKEN` 擁有者是超級管理員（建/殺 session、建房、跨房管理），不受房間密碼影響。
 
 ### `POST /api/rooms/join`（**不需 token**，防爆破限流：同 IP 5 分鐘內錯 10 次 → 429）
 
-Request：`{ "key": "test1234", "nickname": "小明" }`
-Response：`{ "ticket": "...", "roomId": "...", "roomName": "...", "sessionId": "...", "sessionName": "...", "allowWrite": false, "nickname": "小明" }`
+Request：`{ "password": "master1234", "nickname": "小明" }`（相容舊欄位 `key`），或用分享連結的邀請碼 `{ "invite": "<token>", "nickname": "小明" }`（URL 不含明文密碼）
+Response：`{ "ticket": "...", "roomId": "...", "roomName": "...", "sessionId": "...", "sessionName": "...", "role": "master|collab|guest", "allowWrite": <該角色當下有效寫入權>, "nickname": "小明" }`
 
-ticket 是之後 WS 連線的憑證（`/ws/:sessionId?ticket=`），房間關閉或 daemon 重啟即失效。
+ticket 是之後 WS 連線的憑證（`/ws/:sessionId?ticket=`，內含角色），房間關閉或 daemon 重啟即失效。
 
 ### `GET /api/rooms/guest/conversation?ticket=`（**ticket 認證**，不需 token）
 
@@ -229,15 +237,15 @@ ticket 是之後 WS 連線的憑證（`/ws/:sessionId?ticket=`），房間關閉
 
 ### `GET /api/rooms`（token）
 
-列所有房間，含 `guests: [{ nickname, joinedAt, online }]`。
+列所有房間，含三組密碼（`masterPass`/`collabPass`/`guestPass`，供房主端顯示）、三組邀請碼（`masterInvite`/`collabInvite`/`guestInvite`，用來組不含明文密碼的入房連結 `/room.html?invite=<token>`）、`frozen`、`guests: [{ ticket, nickname, role, joinedAt, online }]`。
 
 ### `POST /api/rooms`（token)
 
-`{ "sessionId": "<id|name>", "name?": "...", "key?": "至少4字元，留空自動產生", "allowWrite?": false }` → `201` 房間 JSON。session 必須存在且 alive。
+`{ "sessionId": "<id|name>", "name?": "...", "masterPass?", "collabPass?", "guestPass?", "frozen?": false }` → `201` 房間 JSON。session 必須存在且 alive、且尚未綁房；密碼至少一組、互異、全域唯一（否則 `400`）。
 
 ### `PATCH /api/rooms/:id`（token）
 
-`{ "allowWrite": true|false }` — 即時生效，訪客收到 `room-config` 推送。
+`{ "frozen": true|false }` — 全房凍結開關，即時生效：協作者變唯讀、房主不受影響。各訪客依角色收到 `room-config` 推送。
 
 ### `DELETE /api/rooms/:id`（token）
 
@@ -257,15 +265,16 @@ ticket 是之後 WS 連線的憑證（`/ws/:sessionId?ticket=`），房間關閉
 2. 加入 session 的 `clients` set，之後 PTY 任何輸出都會收到
 3. 該 client 可發 `input` / `resize` 訊息影響 PTY
 
-**認證**：`?token=`（房主，完整權限）或 `?ticket=`（聊天室訪客，僅限該房綁定的 session）。訪客連線受房間權限管制：`input` 只在房間 `allowWrite=true` 時生效（伺服器端強制），`resize` 一律忽略。
+**認證**：`?token=`（本機房主，完整權限）或 `?ticket=`（憑密碼換來的角色憑證，僅限該房綁定的 session）。ticket 連線依角色管制（伺服器端強制）：`input` 依 master / collab（非 frozen）/ guest 決定是否寫入；`resize` 一律忽略。master ticket 另可送 `room-admin` 控制訊息。
 
 ### Client → Server 訊息
 
 | `type` | 欄位 | 行為 |
 |---|---|---|
-| `input` | `data: string` | 寫進 PTY（訪客受 `allowWrite` 管制） |
-| `resize` | `cols: number, rows: number` | resize PTY（latest-resize-wins，多 client 互覆蓋；訪客忽略） |
+| `input` | `data: string` | 寫進 PTY（依角色/凍結管制：guest 恆擋、collab 凍結時擋、master 放行） |
+| `resize` | `cols: number, rows: number` | resize PTY（latest-resize-wins，多 client 互覆蓋；ticket 連線忽略） |
 | `chat` | `text?: string, image?: string` | （訪客連線）發聊天訊息，廣播全房。`image` 為 data URL（`data:image/png|jpeg|webp|gif;base64,...`，≤2M 字元，前端已壓縮；伺服器只保留每房最近 20 張，舊圖退化成 `imageExpired`） |
+| `room-admin` | `action: 'freeze'\|'unfreeze'\|'kick'\|'close'`, `ticket?`（kick 用） | **僅 master ticket**：凍結/解凍全房、踢人、關房 |
 
 非 JSON 或未知 type 一律忽略。
 
@@ -277,10 +286,10 @@ ticket 是之後 WS 連線的憑證（`/ws/:sessionId?ticket=`），房間關閉
 | `termsize` | `cols, rows` | attach 時 + 每次 PTY resize（訪客端跟著 `term.resize`；host 端忽略） |
 | `exit` | `code: number, signal: string\|null` | PTY 進程結束 |
 | `blocked` | `words: string[]` | 輸入含敏感詞被攔截 |
-| `room-init` | `room, nickname, chatLog, guests` | （訪客）連上時的房間狀態 + 聊天歷史 |
+| `room-init` | `room{frozen,allowWrite,...}, role, nickname, chatLog, guests` | （訪客）連上時的房間狀態（含自己的角色與有效寫入權）+ 聊天歷史 |
 | `chat` | `from, nickname, text, image?, imageExpired?, ts` | 房內聊天訊息（`from: host\|guest\|system`） |
-| `room-presence` | `guests: [...]` | 訪客加入 / 離開 |
-| `room-config` | `allowWrite: boolean` | 房主切換輸入權限 |
+| `room-presence` | `guests: [{ticket,nickname,role,online,...}]` | 訪客加入 / 離開 |
+| `room-config` | `frozen?: boolean, allowWrite?: boolean` | 凍結狀態變更；`allowWrite` 為該訪客依角色算出的有效寫入權 |
 | `room-closed` | `reason` | 房間關閉（`host-closed` / `session-exit`） |
 
 ### `ws://localhost:3700/ws/room/:roomId`（token）

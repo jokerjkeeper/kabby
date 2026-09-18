@@ -964,15 +964,20 @@
       <label for="rm-name">房間名稱</label>
       <input id="rm-name" type="text" placeholder="留空 = session 名稱 + 聊天室" autocomplete="off" />
 
-      <label for="rm-key">入房 key</label>
-      <input id="rm-key" type="text" placeholder="留空 = 自動產生（至少 4 字元）" autocomplete="off" spellcheck="false" />
-      <div class="hint">給其他人的入場密碼。知道 key 的人都能進房看到終端畫面，請只給信任的人。</div>
+      <label for="rm-master">主密碼（房主，房內全權）</label>
+      <input id="rm-master" type="password" placeholder="留空 = 不開放遠端房主登入（至少 4 字元）" autocomplete="new-password" spellcheck="false" />
+
+      <label for="rm-collab">協作密碼（可操作終端）</label>
+      <input id="rm-collab" type="password" placeholder="留空 = 不開放協作" autocomplete="new-password" spellcheck="false" />
+
+      <label for="rm-guest">訪客密碼（只能看）</label>
+      <input id="rm-guest" type="password" placeholder="留空 = 不開放訪客" autocomplete="new-password" spellcheck="false" />
+      <div class="hint">三個角色各一組密碼，<b>至少填一個</b>；用哪個密碼進來就是哪個角色（伺服器端強制）。密碼全域不可重複。<br><span style="color:#d7913a">⚠ 主／協作密碼持有者能在這台機器的終端執行指令（用你的權限），只給信任的人。</span></div>
 
       <label class="rc-write-toggle" style="margin-top:12px">
-        <input type="checkbox" id="rm-allow-write" />
-        允許訪客在終端輸入
+        <input type="checkbox" id="rm-frozen" />
+        建立時就凍結（全房唯讀，協作者暫不能寫；房主不受影響）
       </label>
-      <div class="hint" style="color:#d7913a">⚠ 開啟後訪客等於能在這台機器上執行任意指令（用你的權限）。建議先唯讀，需要時再開。</div>
 
       <div class="error" id="rm-error"></div>
       <div class="actions">
