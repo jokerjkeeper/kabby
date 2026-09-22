@@ -842,6 +842,9 @@
     .mention-pop .mi { padding: 5px 10px; cursor: pointer; font-size: 12px; color: #ccc; }
     .mention-pop .mi:hover, .mention-pop .mi.active { background: #094771; color: #fff; }
     #room-chat-input-row { position: relative; }
+    /* 🖼 貼圖鈕：SVG 圖示（emoji 太小難辨識），尺寸對齊 🎙 */
+    #room-chat-img { display: inline-flex; align-items: center; justify-content: center; }
+    .img-ico { width: 18px; height: 18px; flex: none; }
     /* 圖片 lightbox */
     #img-lightbox {
       position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 400;
@@ -947,7 +950,7 @@
       <div id="room-chat-msgs"></div>
       <div id="room-chat-input-row">
         <div class="mention-pop" id="room-mention-pop"></div>
-        <button class="btn tiny" id="room-chat-img" title="貼圖（也可直接在輸入框 Ctrl+V 貼上截圖）" disabled>🖼</button>
+        <button class="btn tiny" id="room-chat-img" title="貼圖（也可直接在輸入框 Ctrl+V 貼上截圖）" disabled><svg class="img-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8" fill="currentColor"/><path d="M21 16l-5-5-8 9"/></svg></button>
         <button class="btn tiny" id="room-chat-voice" title="🎙 按住說話，放開後把文字加到輸入框（自己按 Enter 送出）" disabled>🎙</button>
         <input id="room-chat-input" type="text" placeholder="發言… @ 可 tag 人" maxlength="2000" autocomplete="off" disabled />
         <button class="btn tiny" id="room-chat-send" disabled>送出</button>
