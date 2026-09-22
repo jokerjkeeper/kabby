@@ -918,6 +918,7 @@
       <span id="meta" style="color:#888"></span>
       <button id="split-h-btn" class="btn" style="display:none" title="左右分割焦點 pane（Ctrl+Shift+D）">切左右</button>
       <button id="split-v-btn" class="btn" style="display:none" title="上下分割焦點 pane（Ctrl+Shift+E）">切上下</button>
+      <button id="voice-term-btn" class="btn" style="display:none" title="🎙 按住說話，放開後把文字打進焦點終端（不會自動按 Enter，確認後自己按 Enter 送出）">🎙 說話</button>
       <button id="redraw-btn" class="btn" style="display:none" title="送 Ctrl+L 給 cc 重繪畫面（多 client size 不同造成 TUI 殘留時用）">重繪</button>
       <button id="kill-btn" class="btn danger" style="display:none" title="殺掉這個 PTY（所有 client 會斷開，cc session 結束）">殺 session</button>
     </div>
@@ -947,6 +948,7 @@
       <div id="room-chat-input-row">
         <div class="mention-pop" id="room-mention-pop"></div>
         <button class="btn tiny" id="room-chat-img" title="貼圖（也可直接在輸入框 Ctrl+V 貼上截圖）" disabled>🖼</button>
+        <button class="btn tiny" id="room-chat-voice" title="🎙 按住說話，放開後把文字加到輸入框（自己按 Enter 送出）" disabled>🎙</button>
         <input id="room-chat-input" type="text" placeholder="發言… @ 可 tag 人" maxlength="2000" autocomplete="off" disabled />
         <button class="btn tiny" id="room-chat-send" disabled>送出</button>
         <input type="file" id="room-chat-file" accept="image/*" style="display:none" />
@@ -1205,6 +1207,7 @@
   <script src="https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js"></script>
   <script src="https://unpkg.com/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
   <script src="/convo-view.js"></script>
+  <script src="/voice.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -247,8 +247,10 @@
     #img-lightbox img { max-width: 92vw; max-height: 92vh; border-radius: 4px; }
 
     #chat-input-row { flex: 0 0 auto; display: flex; gap: 6px; padding: 8px; border-top: 1px solid #333; position: relative; }
+    #chat-input-row .btn { flex: 0 0 auto; white-space: nowrap; }
     #chat-input {
       flex: 1;
+      min-width: 0;
       background: #1e1e1e;
       color: #d4d4d4;
       border: 1px solid #444;
@@ -313,6 +315,7 @@
     <span class="me" id="me-nick"></span>
     <button class="btn" id="master-freeze-btn" style="background:#3c3c3c; display:none" title="凍結／解除全房輸入（協作者暫為唯讀；房主不受影響）">🧊 凍結</button>
     <button class="btn" id="master-close-btn" style="background:#5a2d2d; display:none" title="關閉整個聊天室（所有人被斷開；session 不受影響）">關房</button>
+    <button class="btn" id="term-voice-btn" style="background:#3c3c3c; display:none" title="🎙 按住說話，放開後把文字打進終端（不會自動按 Enter，確認後自己在終端按 Enter 送出）">🎙 對終端說</button>
     <button class="btn" id="convo-btn" style="background:#3c3c3c" title="乾淨排版的完整對話記錄（讀對話存檔，不受終端重繪影響，獨立捲動）">📜 對話記錄</button>
     <button class="btn" id="pause-btn" style="background:#3c3c3c" title="切到自己畫面：定格終端慢慢看，不被房主的輸出/捲動打擾；聊天不受影響">⏸ 看自己畫面</button>
     <button class="btn" id="leave-btn" style="background:#3c3c3c" title="離開聊天室（清掉本機入場券）">離開</button>
@@ -331,6 +334,7 @@
       <div id="chat-input-row">
         <div class="mention-pop" id="mention-pop"></div>
         <button class="btn" id="chat-img" style="background:#3c3c3c; padding:6px 10px" title="貼圖（也可直接在輸入框 Ctrl+V 貼上截圖）">🖼</button>
+        <button class="btn" id="chat-voice" style="background:#3c3c3c; padding:6px 10px" title="🎙 按住說話，放開後把文字加到輸入框（自己按 Enter 送出）">🎙</button>
         <input id="chat-input" type="text" placeholder="訊息… @ 可 tag 人" maxlength="2000" autocomplete="off" />
         <button class="btn" id="chat-send">送出</button>
         <input type="file" id="chat-file" accept="image/*" style="display:none" />
@@ -378,6 +382,7 @@
 
   <script src="https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js"></script>
   <script src="/convo-view.js"></script>
+  <script src="/voice.js"></script>
   <script src="/room.js"></script>
 </body>
 </html>

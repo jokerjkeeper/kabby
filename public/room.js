@@ -294,6 +294,7 @@
     }
     setFrozen(false, true);
     connect();
+    voice.recheck();   // 有 ticket 了 → 立刻探測語音服務，不等下一輪輪詢
   }
 
   // ── 畫面跟隨控制 ──
@@ -393,6 +394,7 @@
       ? '房主已開放你在終端輸入（點終端直接打字）'
       : '唯讀模式：只能看終端與聊天，不能輸入指令';
     if (!silent) showToast(allowWrite ? '房主開放了終端輸入' : '已切換為唯讀模式', allowWrite ? '' : 'warn');
+    voice.refresh();   // 終端 🎙 跟著寫入權顯示/隱藏
   }
 
   function connect() {
@@ -401,7 +403,7 @@
     const url = `${proto}//${location.host}/ws/${encodeURIComponent(joinInfo.sessionId)}?ticket=${encodeURIComponent(joinInfo.ticket)}`;
     ws = new WebSocket(url);
 
-    ws.onopen = () => { connDot.classList.remove('off'); connDot.classList.add('on'); };
+    ws.onopen = () => { connDot.classList.remove('off'); connDot.classList.add('on'); voice.refresh(); };
     ws.onmessage = (event) => {
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
@@ -410,6 +412,7 @@
     ws.onclose = () => {
       connDot.classList.remove('on');
       connDot.classList.add('off');
+      voice.refresh();
       if (closedByServer) return;
       // 非預期斷線（daemon 重啟 / 網路閃斷）→ 3 秒後重連；連續失敗 → 回入房表單
       reconnectAttempts += 1;
@@ -553,6 +556,30 @@
       });
     }
   }
+
+  // ── 🎙 語音輸入（錄音/上傳在共用 voice.js；ticket 認證走訪客路由）──
+  // 聊天：所有人可用，文字追加到輸入框；終端：只有有寫入權的人看得到，文字當鍵盤輸入但不補 \r
+  const wsOpen = () => !!(ws && ws.readyState === WebSocket.OPEN);
+  const voice = window.KabbyVoice.create({
+    statusUrl: () => joinInfo ? '/api/rooms/guest/stt/status?ticket=' + encodeURIComponent(joinInfo.ticket) : null,
+    transcribeUrl: () => joinInfo ? '/api/rooms/guest/stt/transcribe?ticket=' + encodeURIComponent(joinInfo.ticket) : null,
+    onToast: showToast,
+  });
+  voice.bind(document.getElementById('chat-voice'), {
+    isAllowed: wsOpen,
+    deniedTitle: '未連線',
+    onText: (text) => window.KabbyVoice.appendToInput(chatInputEl, text),
+  });
+  voice.bind(document.getElementById('term-voice-btn'), {
+    isAllowed: () => allowWrite && wsOpen(),
+    hideWhenDenied: true,
+    deniedTitle: '唯讀模式不能對終端輸入',
+    onText: (text) => {
+      if (!allowWrite || !wsOpen()) return;
+      ws.send(JSON.stringify({ type: 'input', data: window.KabbyVoice.toTerminalText(text) }));
+      showToast('🎙 已打進終端，確認無誤後在終端按 Enter 送出');
+    },
+  });
 
   // ── 綁事件 + boot ──
   document.getElementById('chat-send').addEventListener('click', sendChat);

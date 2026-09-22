@@ -141,6 +141,14 @@
   const metaEl = document.getElementById('meta');
   const killBtn = document.getElementById('kill-btn');
   const redrawBtn = document.getElementById('redraw-btn');
+  const voiceTermBtn = document.getElementById('voice-term-btn');
+  // 🎙 語音輸入（錄音/上傳在共用 voice.js）：終端 + 房主聊天面板共用一個控制器（同時只錄一段）
+  const voice = window.KabbyVoice.create({
+    statusUrl: () => API + '/api/stt/status',
+    transcribeUrl: () => API + '/api/stt/transcribe',
+    headers: () => (authToken ? { 'X-Kabby-Token': authToken } : {}),
+    onToast: (text, kind) => showToast(text, kind),
+  });
   const splitHBtn = document.getElementById('split-h-btn');
   const splitVBtn = document.getElementById('split-v-btn');
   const openViewerBtn = document.getElementById('open-viewer-btn');
@@ -1206,6 +1214,7 @@
       metaEl.textContent = '';
       killBtn.style.display = 'none';
       redrawBtn.style.display = 'none';
+      voiceTermBtn.style.display = 'none';
       splitHBtn.style.display = leaf ? '' : 'none';
       splitVBtn.style.display = leaf ? '' : 'none';
       return;
@@ -1219,6 +1228,8 @@
     metaEl.textContent = `${shorten(s.cwd || '', 50)} · ${s.cols || '?'}x${s.rows || '?'}${resumeTail}`;
     killBtn.style.display = '';
     redrawBtn.style.display = '';
+    voiceTermBtn.style.display = '';
+    voice.refresh();   // 焦點 pane 連線狀態變了 → 🎙 可用狀態跟著變
     splitHBtn.style.display = '';
     splitVBtn.style.display = '';
   }
@@ -1409,6 +1420,22 @@
     closeLeaf(focusedPaneId, true);
   });
   redrawBtn.addEventListener('click', redrawFocused);
+
+  // 終端 🎙：轉寫文字當鍵盤輸入寫進焦點 pane，不補 \r（使用者確認後自己按 Enter，避免 Whisper 幻覺直接送給 AI）
+  function focusedLeafWritable() {
+    const leaf = leaves.get(focusedPaneId);
+    return leaf && leaf.sessionId && leaf.ws && leaf.ws.readyState === WebSocket.OPEN ? leaf : null;
+  }
+  voice.bind(voiceTermBtn, {
+    isAllowed: () => !!focusedLeafWritable(),
+    deniedTitle: '焦點 pane 沒有連線中的 session',
+    onText: (text) => {
+      const leaf = focusedLeafWritable();
+      if (!leaf) { showToast('焦點 pane 已斷線，語音內容未送出', 'warn'); return; }
+      leaf.ws.send(JSON.stringify({ type: 'input', data: window.KabbyVoice.toTerminalText(text) }));
+      if (leaf.term) leaf.term.focus();
+    },
+  });
   splitHBtn.addEventListener('click', () => splitFocused('row'));
   splitVBtn.addEventListener('click', () => splitFocused('col'));
 
@@ -1553,6 +1580,7 @@
       hideLogin();
       updateLockBtn();
       refreshAll();
+      voice.recheck();   // 有 token 了 → 立刻重新探測語音服務
     } catch (err) {
       loginErrorEl.textContent = '連線失敗：' + err.message;
     }
@@ -1833,6 +1861,7 @@
     roomChatInputEl.disabled = !on;
     roomChatSendBtn.disabled = !on;
     roomChatImgBtn.disabled = !on;
+    voice.refresh();   // 🎙 跟著聊天輸入一起啟用/停用
   }
 
   function roomChatDisconnect() {
@@ -2011,6 +2040,13 @@
   );
   roomChatInputEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !roomMention.isOpen()) roomSendChat();
+  });
+
+  // 🎙 語音：文字追加到聊天輸入框，使用者自己按 Enter / 送出
+  voice.bind(document.getElementById('room-chat-voice'), {
+    isAllowed: () => !roomChatInputEl.disabled,
+    deniedTitle: '請先選擇並連上一個聊天室',
+    onText: (text) => window.KabbyVoice.appendToInput(roomChatInputEl, text),
   });
 
   // 貼圖：🖼 按鈕選檔 / 輸入框直接 Ctrl+V 貼截圖
