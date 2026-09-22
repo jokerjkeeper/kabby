@@ -43,8 +43,10 @@ wepages 以 iframe 嵌 kabby 終端，並打 `/api/sessions` 取 session 列表�
 健康檢查，順便回 session / profile 總數與 viewer 配置狀態。
 
 ```json
-{ "ok": true, "authRequired": true, "sessions": 3, "profiles": 5, "viewerConfigured": true }
+{ "ok": true, "authRequired": true, "sessions": 3, "profiles": 5, "viewerConfigured": true, "sttConfigured": true }
 ```
+
+`sttConfigured`：是否設定了語音輸入的 STT 位址（`KABBY_STT_URL`，有預設值所以通常為 `true`；服務實際是否在跑請看 `GET /api/stt/status`）。
 
 `authRequired`：daemon 是否設了 `AUTH_TOKEN`。前端 / wepages 可據此決定是否要帶 token。**此 endpoint 不需 token。**
 
@@ -250,6 +252,48 @@ ticket 是之後 WS 連線的憑證（`/ws/:sessionId?ticket=`，內含角色）
 ### `DELETE /api/rooms/:id`（token）
 
 關房：所有訪客收到 `room-closed` 後被斷開，tickets 回收。
+
+---
+
+## 語音輸入（STT 代理）
+
+🎙 按住說話：瀏覽器錄音轉成 16kHz 單聲道 WAV，POST 給 daemon，daemon **原樣轉發**（不解析 multipart）到 `{KABBY_STT_URL}/transcribe`（Voicebox / Whisper）。瀏覽器不直連 STT，沿用 kabby 自己的 token / ticket 認證。轉寫結果只填進輸入框或打進終端（不補 `\r`），**不會自動送出**。
+
+| 路由 | 認證 | 用途 |
+|---|---|---|
+| `GET /api/stt/status` | token | 房主端探測 STT 服務 |
+| `POST /api/stt/transcribe` | token | 房主端轉寫 |
+| `GET /api/rooms/guest/stt/status?ticket=` | ticket | 訪客端探測（不回傳 `url`） |
+| `POST /api/rooms/guest/stt/transcribe?ticket=` | ticket | 訪客端轉寫；同一 ticket 同時只收一筆（否則 `429`） |
+
+唯讀訪客也能用轉寫來填聊天框；**終端寫入權仍由 WS `input` 依角色 / 凍結判斷**（見 WebSocket 一節），轉寫 API 本身不寫終端。
+
+### `GET /api/stt/status`
+
+daemon 探測 `{KABBY_STT_URL}/health`（逾時 2 秒，結果快取 10 秒）。前端約每 30 秒輪詢一次，`available: true` 才讓 🎙 亮起。
+
+```json
+{ "available": true, "gpu": "CUDA (NVIDIA GeForce RTX 3060)", "url": "http://127.0.0.1:17493" }
+{ "available": false, "error": "語音服務未啟動（ECONNREFUSED）", "url": "http://127.0.0.1:17493" }
+```
+
+### `POST /api/stt/transcribe`
+
+`Content-Type: multipart/form-data`，欄位同 Voicebox：`file`（必填，wav/mp3/m4a/ogg/flac/aac/webm/opus）、`language`（選填，例 `zh`）、`model`（選填）。上限 25MB，逾時 `KABBY_STT_TIMEOUT_MS`（預設 60 秒）。
+
+| 狀態 | Body | 說明 |
+|---|---|---|
+| `200` | `{ "text": "你好…", "duration": 4.07 }` | 轉寫成功 |
+| `202` | `{ "loading": true, "error": "語音模型載入中，請稍候再試" }` | 模型首次使用、下載中；前端提示稍後再試，不自動重試 |
+| `400` | `{ "error": "..." }` | 不是 multipart，或 STT 回報參數錯誤（例如 model 不合法） |
+| `413` | `{ "error": "音檔過大（上限 25MB）" }` | 超過大小上限（含 chunked 上傳，邊轉發邊計量） |
+| `502` | `{ "error": "語音服務未啟動（KABBY_STT_URL=...）" }` | 連不上 STT 服務 |
+| `504` | `{ "error": "語音轉寫逾時（>60 秒）" }` | 超過逾時 |
+| 其他 | `{ "error": "<STT detail>" }` | STT 端錯誤（例如 `500`）原樣轉成一行訊息 |
+
+```bash
+curl -H "X-Kabby-Token: $AUTH_TOKEN" -F file=@hello.wav -F language=zh http://localhost:3700/api/stt/transcribe
+```
 
 ---
 

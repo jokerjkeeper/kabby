@@ -67,6 +67,8 @@ npm run dist        # 打包成 Windows portable exe
 | `HOST` | `127.0.0.1` | 监听地址；设为 `0.0.0.0` 开放局域网直连（务必搭配 `AUTH_TOKEN`） |
 | `AUTH_TOKEN` | （未设） | 设置之后 WS 连接必须带 `?token=<value>` |
 | `KABBY_VIEWER_PATH` | （未设） | cc history viewer 的 portable exe 绝对路径；设置后 UI 上的「viewer」按钮才会启用 |
+| `KABBY_STT_URL` | `http://127.0.0.1:17493` | 🎙 语音输入用的 STT 服务（Voicebox / Whisper）地址，由 daemon 代理转发 |
+| `KABBY_STT_TIMEOUT_MS` | `60000` | 单次语音转写的超时（毫秒） |
 
 用户数据放在 `~/.kabby/`：`profiles.json`（项目列表）、`sensitive-words.json`（敏感词库）、用量索引。
 
@@ -95,6 +97,16 @@ npm run dist        # 打包成 Windows portable exe
 - 房间存在内存里，daemon 重启或绑定会话结束即自动关房
 
 > ⚠ 开启「可输入」等于让访客在这台机器上用你的权限执行任意命令，只给信任的人。
+
+### Voice input（🎙 按住说话）
+
+按住 🎙 说话、松开后转成文字（本机 Whisper，经 [Voicebox](https://github.com/jamiepine/voicebox) 后端）：
+
+- **终端**：主界面状态栏「🎙 說話」、聊天室页顶部「🎙 對終端說」— 文字当作键盘输入打进 cc，**不会自动按 Enter**，确认无误后自己按 Enter 送出（避免 Whisper 幻觉直接送给 AI）。只有有写入权限的人才看得到（只读访客没有这个按钮，服务端也会拦截）
+- **聊天室**：房主面板与访客页输入框旁的 🎙 — 文字追加到输入框，由用户自己送出
+- **服务检测**：daemon 定时探测 `{KABBY_STT_URL}/health`，服务没开时 🎙 显示灰色、不能按，Voicebox 一启动约 30 秒内自动亮起
+- 浏览器只在 **localhost 或 https** 下允许使用麦克风；通过局域网 IP 用 http 打开页面时 🎙 会被禁用
+- 启动 Voicebox 后端：在 Voicebox 目录执行 `.venv\Scripts\python.exe -m uvicorn backend.main:app --port 17493`
 
 ### Remote
 

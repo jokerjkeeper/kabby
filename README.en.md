@@ -67,6 +67,8 @@ Environment variables (put them in `.env`; see `.env.example`):
 | `HOST` | `127.0.0.1` | Bind address; set `0.0.0.0` to allow LAN access (always pair it with `AUTH_TOKEN`) |
 | `AUTH_TOKEN` | (unset) | Once set, WS connections must pass `?token=<value>` |
 | `KABBY_VIEWER_PATH` | (unset) | Absolute path to the cc history viewer executable; enables the "viewer" button in the UI |
+| `KABBY_STT_URL` | `http://127.0.0.1:17493` | STT service (Voicebox / Whisper) used by 🎙 voice input; the daemon proxies requests to it |
+| `KABBY_STT_TIMEOUT_MS` | `60000` | Timeout for a single transcription, in milliseconds |
 
 User data lives in `~/.kabby/`: `profiles.json` (project list), `sensitive-words.json` (blocklist), and the usage index.
 
@@ -95,6 +97,16 @@ Guests open `http://<host>:3700/room.html` (or a copied link carrying `?key=`), 
 - Rooms live in memory; restarting the daemon or ending the bound session closes them
 
 > ⚠ Enabling guest input lets visitors run arbitrary commands on this machine with your permissions. Only hand the key to people you trust.
+
+### Voice input (🎙 push-to-talk)
+
+Hold 🎙, speak, release — the audio is transcribed locally by Whisper through a [Voicebox](https://github.com/jamiepine/voicebox) backend:
+
+- **Terminal**: "🎙 說話" in the main status bar, "🎙 對終端說" at the top of the room page. The text is typed into cc as keyboard input **without pressing Enter** — review it and press Enter yourself, so a Whisper hallucination never reaches the AI unchecked. Only people with write access see this button (read-only guests don't, and the server blocks their input anyway)
+- **Chat**: 🎙 next to the input box in both the host panel and the guest page appends the text to the box; you send it yourself
+- **Service detection**: the daemon probes `{KABBY_STT_URL}/health`; while the service is down, 🎙 is greyed out and disabled, and lights up within about 30 seconds of Voicebox starting
+- Browsers only allow the microphone on **localhost or https**; 🎙 is disabled when the page is opened over plain http on a LAN IP
+- Start the Voicebox backend from its directory: `.venv\Scripts\python.exe -m uvicorn backend.main:app --port 17493`
 
 ### Remote
 
