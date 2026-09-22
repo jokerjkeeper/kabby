@@ -1,4 +1,5 @@
 const http = require('http');
+const https = require('https');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -33,6 +34,9 @@ const VIEWER_PATH = process.env.KABBY_VIEWER_PATH || null;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const ALLOWED_ORIGINS = (process.env.KABBY_ALLOWED_ORIGINS || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
+// 語音輸入（🎙 按住說話）的 STT 服務（Voicebox / Whisper）；daemon 代理轉發，瀏覽器不直連
+const STT_URL = (process.env.KABBY_STT_URL || 'http://127.0.0.1:17493').replace(/\/+$/, '');
+const STT_TIMEOUT_MS = parseInt(process.env.KABBY_STT_TIMEOUT_MS || '60000', 10) || 60000;
 
 // token 取自：X-Kabby-Token header / Authorization: Bearer <token> / ?token= query
 // AUTH_TOKEN 未設則不鎖（本機開發）
@@ -62,7 +66,130 @@ app.get('/api/health', (req, res) => {
     sessions: registry.list().length,
     profiles: profileStore.list().length,
     viewerConfigured: !!(VIEWER_PATH && fs.existsSync(VIEWER_PATH)),
+    sttConfigured: !!STT_URL,
   });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// 語音輸入 STT 代理（房主走 token、訪客走 ticket；路由本體在下方分兩處掛）
+// ──────────────────────────────────────────────────────────────────────────
+const STT_HEALTH_TIMEOUT_MS = 2000;
+const STT_STATUS_CACHE_MS = 10 * 1000;
+const STT_MAX_BYTES = 25 * 1024 * 1024;
+let sttStatusCache = null;   // { at, value }
+let sttStatusInflight = null;
+
+// 探測 {STT_URL}/health，結果快取 10 秒（前端每 30 秒輪詢、多分頁共用）
+async function probeSttStatus() {
+  if (sttStatusCache && Date.now() - sttStatusCache.at < STT_STATUS_CACHE_MS) return sttStatusCache.value;
+  if (sttStatusInflight) return sttStatusInflight;
+  sttStatusInflight = (async () => {
+    let value;
+    try {
+      const resp = await fetch(STT_URL + '/health', { signal: AbortSignal.timeout(STT_HEALTH_TIMEOUT_MS) });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const info = await resp.json().catch(() => ({}));
+      value = { available: true, gpu: info.gpu_available ? (info.gpu_type || true) : false };
+    } catch (err) {
+      // fetch 的連線錯誤訊息只有 "fetch failed"，真正原因在 err.cause.code（ECONNREFUSED…）
+      const reason = err.name === 'TimeoutError' ? '逾時' : ((err.cause && err.cause.code) || err.message);
+      value = { available: false, error: `語音服務未啟動（${reason}）` };
+    }
+    sttStatusCache = { at: Date.now(), value };
+    return value;
+  })().finally(() => { sttStatusInflight = null; });
+  return sttStatusInflight;
+}
+
+// 把 STT 服務的錯誤 body（{detail: string|{message}}）轉成一行中文可讀訊息
+function sttErrorMessage(status, body) {
+  const d = body && body.detail;
+  if (typeof d === 'string') return d;
+  if (d && typeof d.message === 'string') return d.message;
+  return `語音服務錯誤（HTTP ${status}）`;
+}
+
+// 原樣轉發 multipart（不解析、不加 multer）到 {STT_URL}/transcribe，保留 content-type boundary。
+// 回應正規化：200 → {text, duration}；202（模型下載中）→ {loading:true, error}；其他 → {error}
+function proxyTranscribe(req, res) {
+  const contentType = req.get('content-type') || '';
+  if (!/^multipart\/form-data/i.test(contentType)) {
+    return res.status(400).json({ error: '需要 multipart/form-data（file 欄位）' });
+  }
+  const declared = parseInt(req.get('content-length') || '0', 10);
+  if (declared > STT_MAX_BYTES) return res.status(413).json({ error: '音檔過大（上限 25MB）' });
+
+  let target;
+  try { target = new URL(STT_URL + '/transcribe'); } catch {
+    return res.status(500).json({ error: `KABBY_STT_URL 設定錯誤（${STT_URL}）` });
+  }
+  const headers = { 'content-type': contentType };
+  if (declared) headers['content-length'] = String(declared);
+  const lib = target.protocol === 'https:' ? https : http;
+  let finished = false;
+  const fail = (status, error) => {
+    if (finished) return;
+    finished = true;
+    if (!res.headersSent) res.status(status).json({ error });
+  };
+
+  const upstream = lib.request(target, { method: 'POST', headers }, (up) => {
+    const chunks = [];
+    up.on('data', (c) => chunks.push(c));
+    up.on('end', () => {
+      if (finished) return;
+      finished = true;
+      let body = null;
+      try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {}
+      if (up.statusCode === 200 && body && typeof body.text === 'string') {
+        return res.json({ text: body.text, duration: body.duration });
+      }
+      if (up.statusCode === 202) {
+        return res.status(202).json({ loading: true, error: '語音模型載入中，請稍候再試' });
+      }
+      res.status(up.statusCode >= 400 ? up.statusCode : 502).json({ error: sttErrorMessage(up.statusCode, body) });
+    });
+    up.on('error', (err) => fail(502, `語音服務回應中斷（${err.message}）`));
+  });
+  upstream.setTimeout(STT_TIMEOUT_MS, () => {
+    upstream.destroy();
+    fail(504, `語音轉寫逾時（>${Math.round(STT_TIMEOUT_MS / 1000)} 秒）`);
+  });
+  upstream.on('error', (err) => {
+    sttStatusCache = null;   // 連不上 → 下次 status 重新探測
+    fail(502, err.code === 'ECONNREFUSED' ? `語音服務未啟動（KABBY_STT_URL=${STT_URL}）` : `語音服務連線失敗（${err.message}）`);
+  });
+
+  // 邊轉發邊計量：沒帶 content-length（chunked）也擋得住超量
+  let received = 0;
+  req.on('data', (chunk) => {
+    received += chunk.length;
+    if (received > STT_MAX_BYTES) {
+      upstream.destroy();
+      req.unpipe(upstream);
+      fail(413, '音檔過大（上限 25MB）');
+    }
+  });
+  // 瀏覽器中途斷線（關頁 / 取消）→ 一併取消上游，別讓 GPU 白跑
+  res.on('close', () => { if (!finished) { finished = true; upstream.destroy(); } });
+  req.pipe(upstream);
+}
+
+// 訪客語音（ticket 認證，在 token middleware 之前）。唯讀訪客也能用來填聊天框；
+// 終端寫入權仍由 WS input 端的 effectiveWrite 把關。同一 ticket 一次只收一筆，避免狂打 GPU。
+const guestSttInflight = new Set();
+app.get('/api/rooms/guest/stt/status', async (req, res) => {
+  if (!roomRegistry.resolveTicket(req.query.ticket || '')) return res.status(401).json({ error: 'ticket 無效或房間已關閉' });
+  const { available, gpu, error } = await probeSttStatus();
+  res.json({ available, gpu, error });   // 不外露本機 STT 位址給訪客
+});
+app.post('/api/rooms/guest/stt/transcribe', (req, res) => {
+  const ticket = String(req.query.ticket || '');
+  if (!roomRegistry.resolveTicket(ticket)) return res.status(401).json({ error: 'ticket 無效或房間已關閉' });
+  if (guestSttInflight.has(ticket)) return res.status(429).json({ error: '上一段語音還在轉寫中' });
+  guestSttInflight.add(ticket);
+  res.on('close', () => guestSttInflight.delete(ticket));
+  proxyTranscribe(req, res);
 });
 
 // 訪客入房（不需 AUTH_TOKEN — 訪客只有房間 key）。放在 token middleware 之前。
@@ -153,6 +280,12 @@ app.use('/api', (req, res, next) => {
 app.get('/api/providers', (req, res) => {
   res.json(providers.listProviders());
 });
+
+// 房主語音（token 認證）
+app.get('/api/stt/status', async (req, res) => {
+  res.json({ ...(await probeSttStatus()), url: STT_URL });
+});
+app.post('/api/stt/transcribe', proxyTranscribe);
 
 // 房主看「當前 kabby session」的乾淨版對話記錄（token 認證；不必開房）。
 // 傳 kabby session id，走跟訪客端同一套解析（readSessionConversation）。
