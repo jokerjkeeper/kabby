@@ -29,13 +29,19 @@ registerProcessor('kabby-capture', Capture);`;
   // Whisper 在靜音 / 雜訊上常見的幻覺字幕；整段轉寫只剩這些 → 丟棄
   const HALLUCINATION_RE = /^[\s,.，。!！?？]*(字幕(志願者|志愿者|由).*|.*(優優|优优)獨播劇場.*|.*YoYo Television Series.*|請不吝點贊.*|请不吝点赞.*|謝謝(大家)?(收看|觀看)[。！!]*|谢谢(大家)?(收看|观看)[。！!]*|ご視聴ありがとうございました)[\s,.，。!！?？]*$/i;
 
+  const MIC_SVG = '<svg class="voice-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    + '<rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4M8 22h8"/></svg>';
+
   let styleInjected = false;
   function injectStyle() {
     if (styleInjected) return;
     styleInjected = true;
     const st = document.createElement('style');
     st.textContent = `
-      .voice-btn { position: relative; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+      .voice-btn { position: relative; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none;
+                   display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+      .voice-btn .voice-ico { width: 15px; height: 15px; flex: none; }
+      .voice-btn.icon-only .voice-ico { width: 18px; height: 18px; }
       .voice-btn.voice-off { filter: grayscale(1); opacity: .45; }
       .voice-btn.recording { background: #c0392b !important; color: #fff !important; }
       .voice-btn.recording::after {
@@ -251,6 +257,12 @@ registerProcessor('kabby-capture', Capture);`;
     function bind(btn, cfg) {
       const b = { btn, cfg, baseTitle: cfg.title || btn.title || '🎙 按住說話，放開後轉成文字' };
       btn.classList.add('voice-btn');
+      // 🎙 emoji 在小按鈕裡太小難辨識 → 換成 SVG 麥克風（其餘文字標籤保留）
+      const label = btn.textContent.replace('🎙', '').trim();
+      btn.textContent = '';
+      btn.insertAdjacentHTML('afterbegin', MIC_SVG);
+      if (label) { const span = document.createElement('span'); span.textContent = label; btn.appendChild(span); }
+      else btn.classList.add('icon-only');
       bindings.push(b);
       btn.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
