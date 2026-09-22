@@ -6,7 +6,7 @@
  *
  * 連不上 daemon：彈「連接失敗」對話框，給「重試 / 離開」。
  */
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, session } = require('electron');
 const { DAEMON_URL, WINDOW_WIDTH, WINDOW_HEIGHT } = require('./config');
 
 /** @type {BrowserWindow | null} */
@@ -35,7 +35,24 @@ function loadDaemon() {
   mainWindow.loadURL(DAEMON_URL).catch(() => { /* 交給 did-fail-load 處理 */ });
 }
 
+/**
+ * 權限：只放行 daemon 來源的請求（🎙 語音輸入要 media 麥克風權限），其他來源一律拒絕。
+ * Electron 未設 handler 時預設全部放行；明確限定來源比較安全，daemon 頁面照常可用。
+ */
+function setupPermissions() {
+  let daemonOrigin = null;
+  try { daemonOrigin = new URL(DAEMON_URL).origin; } catch { /* DAEMON_URL 格式錯誤 → 全部拒絕 */ }
+  const fromDaemon = (url) => {
+    try { return !!daemonOrigin && new URL(url).origin === daemonOrigin; } catch { return false; }
+  };
+  session.defaultSession.setPermissionRequestHandler((contents, _permission, callback, details) => {
+    callback(fromDaemon((details && details.requestingUrl) || contents.getURL()));
+  });
+  session.defaultSession.setPermissionCheckHandler((_contents, _permission, requestingOrigin) => fromDaemon(requestingOrigin));
+}
+
 app.whenReady().then(() => {
+  setupPermissions();
   createWindow();
 
   // 主框架載入失敗（daemon 沒開、連線被拒等）→ 彈連接失敗對話框
