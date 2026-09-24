@@ -2,9 +2,9 @@
  * 讀 cc 的對話歷史（~/.claude/projects/<encoded-cwd>/<uuid>.jsonl）
  *
  * 編碼規則（從 cc 觀察 + 用戶驗證）：
- *   D:\Git\kabby              →  D--Git-kabby
+ *   J:\Git\kabby              →  D--Git-kabby
  *   D:\Work\my_project        →  D--Work-my-project   ← 底線也會被換
- *   D:\Git\claude-code-2.1.88 →  D--Git-claude-code-2-1-88   ← 點號也會被換
+ *   J:\Git\claude-code-2.1.88 →  D--Git-claude-code-2-1-88   ← 點號也會被換
  *   規則：每個非英數字元一律換成 '-'，連續不合併。
  *
  * normalize 步驟（避免使用者填法導致對不上 cc 內部規範化的路徑）：

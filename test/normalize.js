@@ -1,14 +1,14 @@
 const h = require('../src/cc-history');
 
 const cases = [
-  ['d:\\Git\\kabby\\', 'D:\\Git\\kabby', 'D--Git-kabby'],
-  ['D:\\Git\\kabby', 'D:\\Git\\kabby', 'D--Git-kabby'],
-  ['d:/Git/kabby/', 'D:/Git/kabby', 'D--Git-kabby'],
+  ['j:\\Git\\kabby\\', 'J:\\Git\\kabby', 'J--Git-kabby'],
+  ['J:\\Git\\kabby', 'J:\\Git\\kabby', 'J--Git-kabby'],
+  ['j:/Git/kabby/', 'J:/Git/kabby', 'J--Git-kabby'],
   // 底線也要換 '-'，根據用戶驗證的 cc 行為
   ['D:\\Work\\my_app\\game\\', 'D:\\Work\\my_app\\game', 'D--Work-my-app-game'],
   ['D:\\Work\\my_app', 'D:\\Work\\my_app', 'D--Work-my-app'],
   // 點號也要換
-  ['D:\\Git\\claude-code-2.1.88', 'D:\\Git\\claude-code-2.1.88', 'D--Git-claude-code-2-1-88'],
+  ['J:\\Git\\claude-code-2.1.88', 'J:\\Git\\claude-code-2.1.88', 'J--Git-claude-code-2-1-88'],
 ];
 let fails = 0;
 for (const [input, expectNorm, expectEnc] of cases) {

@@ -180,9 +180,9 @@
 **cc project 目錄編碼規則**
 
 ```
-D:\Git\kabby                → D--Git-kabby
+J:\Git\kabby                → D--Git-kabby
 D:\Projects\my-app        → D--Projects-my-app       ← 底線也換
-D:\Git\claude-code-2.1.88   → D--Git-claude-code-2-1-88  ← 點號也換
+J:\Git\claude-code-2.1.88   → D--Git-claude-code-2-1-88  ← 點號也換
 ```
 
 規則：`[^A-Za-z0-9]` 一律換成 `-`，連續不合併。Windows drive letter 統一大寫，去尾巴 slash。

@@ -556,7 +556,7 @@ app.post('/api/sessions/:id/input', (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────
 
 // GET /api/usage                 → 只讀索引（背景 watcher 已維護），回聚合
-// GET /api/usage?cwd=D:\Git\xxx  → 同上但只回該 project
+// GET /api/usage?cwd=J:\Git\xxx  → 同上但只回該 project
 // GET /api/usage?refresh=1       → 強制立刻增量掃一次再回（手動刷新）
 // GET /api/usage?rebuild=1       → 砍索引從頭全掃（套用新敏感詞庫到既有歷史，較重）
 app.get('/api/usage', (req, res) => {
