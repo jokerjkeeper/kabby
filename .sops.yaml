@@ -1,0 +1,4 @@
+# SOPS 設定：.env 加密成 .env.enc（由 Claude Launcher 產生）
+creation_rules:
+  - path_regex: '(^|[/\\])\.env(\.enc)?$'
+    age: 'age1mwdzgltf72y3vp70774ueq8394408mey0nuy0mg8vxvy46rddges8e8mw8'

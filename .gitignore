@@ -49,3 +49,6 @@ desktop.ini
 *.pid
 *.seed
 *.pid.lock
+
+# env secrets（Claude Launcher）
+!.env.enc
