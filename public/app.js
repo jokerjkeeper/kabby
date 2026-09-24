@@ -708,7 +708,8 @@
     // 這些組合鍵保留給 kabby（切 tab / split / 關 pane），xterm 不處理
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
-        if (['ArrowLeft', 'ArrowRight', 'KeyD', 'KeyE', 'KeyW', 'KeyB'].includes(e.code)) return false;
+        // KeyV = 語音輸入快捷鍵（voice.js 攔在 capture 階段），這裡再擋一次保險
+        if (['ArrowLeft', 'ArrowRight', 'KeyD', 'KeyE', 'KeyW', 'KeyB', 'KeyV'].includes(e.code)) return false;
       }
       return true;
     });
@@ -1427,6 +1428,7 @@
     return leaf && leaf.sessionId && leaf.ws && leaf.ws.readyState === WebSocket.OPEN ? leaf : null;
   }
   voice.bind(voiceTermBtn, {
+    hotkey: true,          // 按住 Ctrl+Shift+V 等同按住這顆
     isAllowed: () => !!focusedLeafWritable(),
     deniedTitle: '焦點 pane 沒有連線中的 session',
     onText: (text) => {

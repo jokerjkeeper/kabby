@@ -571,6 +571,7 @@
     onText: (text) => window.KabbyVoice.appendToInput(chatInputEl, text),
   });
   voice.bind(document.getElementById('term-voice-btn'), {
+    hotkey: true,          // 按住 Ctrl+Shift+V 等同按住這顆
     isAllowed: () => allowWrite && wsOpen(),
     hideWhenDenied: true,
     deniedTitle: '唯讀模式不能對終端輸入',

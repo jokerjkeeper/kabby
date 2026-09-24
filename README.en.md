@@ -102,7 +102,8 @@ Guests open `http://<host>:3700/room.html` (or a copied link carrying `?key=`), 
 
 Hold 🎙, speak, release — the audio is transcribed locally by Whisper through a [Voicebox](https://github.com/jamiepine/voicebox) backend:
 
-- **Terminal**: "🎙 說話" in the main status bar, "🎙 對終端說" at the top of the room page. The text is typed into cc as keyboard input **without pressing Enter** — review it and press Enter yourself, so a Whisper hallucination never reaches the AI unchecked. Only people with write access see this button (read-only guests don't, and the server blocks their input anyway)
+- **Terminal**: "🎙 說話" in the main status bar, "🎙 對終端說" at the top of the room page, or **hold `Ctrl`+`Shift`+`V`**. The text is typed into cc as keyboard input **without pressing Enter** — review it and press Enter yourself, so a Whisper hallucination never reaches the AI unchecked. Only people with write access see this button (read-only guests don't, and the server blocks their input anyway)
+- **Hotkey**: hold `Ctrl`+`Shift`+`V` to record and release to send — the same as holding the terminal's 🎙. Typing `v` in the terminal still works, and the hotkey is ignored while a chat input box has focus (where it stays the browser's paste-as-plain-text)
 - **Chat**: 🎙 next to the input box in both the host panel and the guest page appends the text to the box; you send it yourself
 - **Service detection**: the daemon probes `{KABBY_STT_URL}/health`; while the service is down, 🎙 is greyed out and disabled, and lights up within about 30 seconds of Voicebox starting
 - Browsers only allow the microphone on **localhost or https**; 🎙 is disabled when the page is opened over plain http on a LAN IP

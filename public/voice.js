@@ -158,9 +158,10 @@ registerProcessor('kabby-capture', Capture);`;
       b.btn.style.setProperty('--voice-level', Math.min(100, peak * 140) + '%');
     }
 
-    async function startRecording(b) {
+    async function startRecording(b, explain) {
       if (rec.recording || busy) return;
-      if (!evaluate(b).ok) return;
+      const r = evaluate(b);
+      if (!r.ok) { if (explain) onToast(r.why, 'warn'); return; }
       rec.recording = true;
       rec.active = b;
       rec.chunks = [];
@@ -253,9 +254,55 @@ registerProcessor('kabby-capture', Capture);`;
       }
     }
 
-    /** 把一顆按鈕綁成「按住說話」 */
+    // ── 鍵盤快捷鍵：按住 Ctrl+Shift+V 錄音、放開送出 ──
+    // 用 capture 搶在 xterm 的 keydown 之前，終端才不會把它當輸入；單純的 V 不攔（終端要打字）。
+    let hotkeyBinding = null;   // 標了 hotkey 的那顆按鈕（終端 🎙）
+    let hotkeyDown = false;
+    const HOTKEY_LABEL = 'Ctrl+Shift+V';
+
+    // 焦點在一般輸入框（聊天輸入框等）時不攔：那裡 Ctrl+Shift+V 仍是瀏覽器的「貼上純文字」
+    function focusInPlainInput() {
+      const el = document.activeElement;
+      if (!el) return false;
+      if (el.classList && el.classList.contains('xterm-helper-textarea')) return false;   // xterm 的隱藏輸入 = 終端
+      return el.matches && el.matches('input, textarea, [contenteditable="true"]');
+    }
+
+    function onHotkeyDown(e) {
+      if (!hotkeyBinding || e.code !== 'KeyV' || !e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return;
+      if (focusInPlainInput()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat || hotkeyDown) return;
+      hotkeyDown = true;
+      startRecording(hotkeyBinding, true);   // 不能用時用 toast 說明原因（按鍵沒有 tooltip 可看）
+    }
+
+    function releaseHotkey() {
+      if (!hotkeyDown) return;
+      hotkeyDown = false;
+      if (rec.active === hotkeyBinding && rec.recording) stopRecording();
+    }
+
+    function onHotkeyUp(e) {
+      // V 放開、或修飾鍵先放開，都視為結束（避免卡在錄音中）
+      if (e.code === 'KeyV' || e.key === 'Control' || e.key === 'Shift') releaseHotkey();
+    }
+
+    function enableHotkey() {
+      window.addEventListener('keydown', onHotkeyDown, true);
+      window.addEventListener('keyup', onHotkeyUp, true);
+      window.addEventListener('blur', releaseHotkey);   // 切走視窗時別一直錄
+    }
+
+    /** 把一顆按鈕綁成「按住說話」；cfg.hotkey = 這顆同時吃 Ctrl+Shift+V */
     function bind(btn, cfg) {
       const b = { btn, cfg, baseTitle: cfg.title || btn.title || '🎙 按住說話，放開後轉成文字' };
+      if (cfg.hotkey) {
+        if (!hotkeyBinding) enableHotkey();
+        hotkeyBinding = b;
+        b.baseTitle += `（或按住 ${HOTKEY_LABEL}）`;
+      }
       btn.classList.add('voice-btn');
       // 🎙 emoji 在小按鈕裡太小難辨識 → 換成 SVG 麥克風（其餘文字標籤保留）
       const label = btn.textContent.replace('🎙', '').trim();
