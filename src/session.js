@@ -48,6 +48,7 @@ class Session extends EventEmitter {
 
     // 若 args 含 provider 的 resume 參數，記下這個歷史 session id 供佔用偵測用
     this.resumeSessionId = providers.extractResumeSessionId(this.provider, spawnArgs);
+    this.ccSessionId = null;   // 對話存檔 id 快取（daemon resolveConvoId 定位；/clear 後會換）
 
     try {
       this.proc = pty.spawn(spawnCmd, spawnArgs, {
@@ -151,7 +152,8 @@ class Session extends EventEmitter {
       profileId: this.profileId,
       provider: this.provider,
       resumeSessionId: this.resumeSessionId,
-      ccSessionId: this.provider === 'claude' ? this.resumeSessionId : null,
+      // 對話存檔 id：resume 帶入的，或對話視圖/記錄定位到的（含 /clear 後換的新檔）
+      ccSessionId: this.provider === 'claude' ? (this.ccSessionId || this.resumeSessionId || null) : null,
     };
   }
 

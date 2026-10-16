@@ -443,6 +443,141 @@ function readConversation(sessionId) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// 對話視圖用的細粒度 items（含工具 input 與 tool_result）
+//
+// 與 readConversation（摘要級 turns）不同：這裡逐 content block 展平成時間序 items，
+// 讓前端畫「工具卡片 + markdown 回覆」。jsonl 是 append-only → 每檔快取 byte offset，
+// 輪詢時只解析新增的完整行（大檔也只付增量成本）。
+//   { kind:'user',      text, ts }
+//   { kind:'assistant', text, model, ts }
+//   { kind:'tool',      id, name, input, ts }          // input 內長字串截斷
+//   { kind:'result',    toolUseId, content, isError }  // content 截斷
+// ──────────────────────────────────────────────────────────────────────────
+const CHAT_MAX_STR = 4096;
+const CHAT_CACHE_MAX = 32;
+const chatCache = new Map();   // file → { offset, items }（Map 插入序當 LRU）
+
+function clipStr(s, n = CHAT_MAX_STR) {
+  s = String(s);
+  return s.length <= n ? s : s.slice(0, n) + `\n…（已截斷，共 ${s.length} 字）`;
+}
+
+/** 淺層截斷 tool input 的長字串欄位（Write 的 content 動輒數萬字）。 */
+function clipInput(input) {
+  if (!input || typeof input !== 'object') return input || {};
+  const out = Array.isArray(input) ? [] : {};
+  for (const [k, v] of Object.entries(input)) {
+    if (typeof v === 'string') out[k] = clipStr(v);
+    else if (v && typeof v === 'object') {
+      // 巢狀（MultiEdit 的 edits、TodoWrite 的 todos）：太大就降級成截斷字串
+      const json = JSON.stringify(v);
+      out[k] = json.length <= CHAT_MAX_STR * 2 ? v : clipStr(json, CHAT_MAX_STR * 2);
+    } else out[k] = v;
+  }
+  return out;
+}
+
+/** tool_result 的 content 可能是字串或 [{type:'text'|'image'}]，統一成字串。 */
+function resultText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map((p) => {
+      if (typeof p === 'string') return p;
+      if (p && p.type === 'text') return p.text || '';
+      if (p && p.type === 'image') return '[圖片]';
+      return '';
+    }).filter(Boolean).join('\n');
+  }
+  return '';
+}
+
+// 使用者端不該當成「對話」顯示的注入內容（slash 指令輸出、caveat、system reminder…）
+const CHAT_SKIP_USER = /^\s*<(local-command-stdout|local-command-stderr|local-command-caveat|system-reminder|bash-stdout|bash-stderr)/;
+
+/** 把 jsonl 的一行轉成 0..n 個 chat items（純函數，供測試）。 */
+function chatItemsFromLine(obj) {
+  const out = [];
+  if (!obj || !obj.message || obj.isSidechain) return out;
+  const ts = obj.timestamp || null;
+  const content = obj.message.content;
+  if (obj.type === 'user') {
+    if (obj.isMeta || obj.isCompactSummary) return out;
+    const parts = typeof content === 'string' ? [{ type: 'text', text: content }] : (Array.isArray(content) ? content : []);
+    const texts = [];
+    for (const p of parts) {
+      if (!p) continue;
+      if (p.type === 'tool_result') {
+        out.push({
+          kind: 'result',
+          toolUseId: p.tool_use_id || null,
+          content: clipStr(resultText(p.content)),
+          isError: !!p.is_error,
+          ts,
+        });
+      } else if (p.type === 'text' && p.text && !CHAT_SKIP_USER.test(p.text)) {
+        texts.push(p.text);
+      } else if (p.type === 'image') {
+        texts.push('[圖片]');
+      }
+    }
+    const text = stripTagsKeepLines(texts.join('\n'));
+    if (text) out.unshift({ kind: 'user', text, ts });
+  } else if (obj.type === 'assistant') {
+    const model = obj.message.model || null;
+    const parts = typeof content === 'string' ? [{ type: 'text', text: content }] : (Array.isArray(content) ? content : []);
+    for (const b of parts) {
+      if (!b) continue;
+      if (b.type === 'text') {
+        const text = (b.text || '').trim();
+        if (text) out.push({ kind: 'assistant', text, model, ts });
+      } else if (b.type === 'tool_use') {
+        out.push({ kind: 'tool', id: b.id || null, name: b.name || 'tool', input: clipInput(b.input), ts });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * 讀某 session 的 chat items（增量快取）。回傳 { file, size, mtime, items } 或 null。
+ * 檔案變小（被重寫）時整份重解析。
+ */
+function readChatItems(sessionId) {
+  const file = findSessionFile(sessionId);
+  return file ? readChatItemsFromFile(file) : null;
+}
+
+/** 同上，直接給檔案路徑（供測試）。 */
+function readChatItemsFromFile(file) {
+  let stat;
+  try { stat = fs.statSync(file); } catch { return null; }
+  let entry = chatCache.get(file);
+  if (!entry || stat.size < entry.offset) entry = { offset: 0, items: [] };
+  chatCache.delete(file);
+  chatCache.set(file, entry);   // 移到 LRU 尾端
+  while (chatCache.size > CHAT_CACHE_MAX) chatCache.delete(chatCache.keys().next().value);
+
+  if (stat.size > entry.offset) {
+    const len = stat.size - entry.offset;
+    const buf = Buffer.alloc(len);
+    const fd = fs.openSync(file, 'r');
+    try { fs.readSync(fd, buf, 0, len, entry.offset); } finally { fs.closeSync(fd); }
+    const lastNl = buf.lastIndexOf(NEWLINE);
+    if (lastNl >= 0) {   // 只吃完整行；尾端半行留到下次
+      const chunk = buf.subarray(0, lastNl + 1).toString('utf8');
+      for (const line of chunk.split('\n')) {
+        if (!line.trim()) continue;
+        let obj;
+        try { obj = JSON.parse(line); } catch { continue; }
+        for (const it of chatItemsFromLine(obj)) entry.items.push(it);
+      }
+      entry.offset += lastNl + 1;
+    }
+  }
+  return { file, size: stat.size, mtime: stat.mtimeMs, items: entry.items };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // 單 session 成本歸因（drill-down）
 //
 // 目的：回答「這個 session 為什麼貴 / 誰把 token 吃掉的」。
@@ -635,6 +770,9 @@ module.exports = {
   view,
   sensitiveHits,
   readConversation,
+  readChatItems,
+  readChatItemsFromFile,
+  chatItemsFromLine,
   analyzeSession,
   findSessionFile,
   // 匯出供測試

@@ -234,21 +234,55 @@ app.post('/api/rooms/join', (req, res) => {
   });
 });
 
-// 把一個運行中的 kabby session 對應到它的 cc/codex 對話存檔並讀出 turns（房主 + 訪客共用）。
-// 定位規則：resume 的直接用該 id；否則取該 cwd 下「PTY 啟動後仍有更新」的最新一份
-//（cc 啟動即建檔、活躍中 mtime 持續前進）。定位結果快取在 session.ccSessionId 上——
-// 這條會被前端每 8 秒輪詢，不要每次都重掃整個歷史目錄。回傳只含 turns（不外露本機路徑）。
-async function readSessionConversation(session) {
-  const provider = providers.getProvider(session.provider);
-  if (!provider.historySupported) return { turns: [], unsupported: true, provider: provider.id };
-  let ccSessionId = session.resumeSessionId || session.ccSessionId;
-  if (!ccSessionId) {
+// 把一個運行中的 kabby session 對應到它的 cc/codex 對話存檔 id。
+// 定位規則：resume 的先用該 id；否則取該 cwd 下「PTY 啟動後仍有更新」的最新一份
+//（cc 啟動即建檔、活躍中 mtime 持續前進）。結果快取在 session.ccSessionId。
+// cc 的 /clear 會另開新 jsonl → claude 每 3 秒便宜地重看一次目錄（只 readdir+stat），
+// 發現「啟動後更新、未被其他 live session 佔用、且比目前這份更新」的檔就換過去。
+const CONVO_RECHECK_MS = 3000;
+async function resolveConvoId(session, provider) {
+  let current = session.ccSessionId || session.resumeSessionId || null;
+  if (provider.id === 'claude') {
+    const now = Date.now();
+    if (current && now - (session._convoCheckedAt || 0) < CONVO_RECHECK_MS) return current;
+    session._convoCheckedAt = now;
+    const dir = history.projectDir(provider.id, session.cwd);
+    const started = new Date(session.createdAt).getTime();
+    const claimed = new Set();
+    for (const other of registry.sessions.values()) {
+      if (other === session || !other.alive) continue;
+      if (other.resumeSessionId) claimed.add(other.resumeSessionId);
+      if (other.ccSessionId) claimed.add(other.ccSessionId);
+    }
+    let best = null;
+    let currentMtime = -1;
+    let names = [];
+    try { names = fs.readdirSync(dir); } catch {}
+    for (const name of names) {
+      if (!name.endsWith('.jsonl')) continue;
+      const id = name.slice(0, -6);
+      let mtime;
+      try { mtime = fs.statSync(path.join(dir, name)).mtimeMs; } catch { continue; }
+      if (id === current) { currentMtime = mtime; continue; }
+      if (mtime < started || claimed.has(id)) continue;
+      if (!best || mtime > best.mtime) best = { id, mtime };
+    }
+    if (best && best.mtime > currentMtime) current = best.id;
+  } else if (!current) {
     const items = await history.listHistory(provider.id, session.cwd);
     const started = new Date(session.createdAt).getTime();
     const hit = items.find((h) => h.mtime >= started);
-    ccSessionId = hit ? hit.sessionId : null;
-    if (ccSessionId) session.ccSessionId = ccSessionId;
+    current = hit ? hit.sessionId : null;
   }
+  if (current) session.ccSessionId = current;
+  return current;
+}
+
+// 讀出 turns（房主 + 訪客共用；只回 turns，不外露本機路徑）。
+async function readSessionConversation(session) {
+  const provider = providers.getProvider(session.provider);
+  if (!provider.historySupported) return { turns: [], unsupported: true, provider: provider.id };
+  const ccSessionId = await resolveConvoId(session, provider);
   if (!ccSessionId) return { turns: [], notFound: true };
   const convo = await collectorFor(provider.id).readConversation(ccSessionId);
   if (!convo) {
@@ -256,6 +290,42 @@ async function readSessionConversation(session) {
     return { turns: [], notFound: true };
   }
   return { turns: convo.turns || [] };
+}
+
+// codex 尚無細粒度 reader → 由摘要 turns 降級成 chat items（工具只有 name+hint、無 result）。
+function turnsToChatItems(turns) {
+  const out = [];
+  for (const t of turns || []) {
+    if (t.role === 'user') { out.push({ kind: 'user', text: t.text, ts: t.ts }); continue; }
+    if (t.text) out.push({ kind: 'assistant', text: t.text, model: t.model || null, ts: t.ts });
+    for (const tool of t.tools || []) {
+      out.push({ kind: 'tool', id: null, name: tool.name, input: tool.hint ? { hint: tool.hint } : {}, ts: t.ts });
+    }
+  }
+  return out;
+}
+
+// 對話視圖：回傳 items[after..]。key = 對話存檔 id；前端帶回 key+after，
+// 檔案沒長大就回 { unchanged:true }（輪詢近乎零成本）；key 變了（/clear）回 reset。
+async function readSessionChat(session, key, after) {
+  const provider = providers.getProvider(session.provider);
+  if (!provider.historySupported) return { unsupported: true, provider: provider.id };
+  const id = await resolveConvoId(session, provider);
+  if (!id) return { notFound: true };
+  let items;
+  if (provider.id === 'claude') {
+    const r = ccCollector.readChatItems(id);
+    if (!r) { session.ccSessionId = null; return { notFound: true }; }
+    items = r.items;
+  } else {
+    const convo = await collectorFor(provider.id).readConversation(id);
+    if (!convo) { session.ccSessionId = null; return { notFound: true }; }
+    items = turnsToChatItems(convo.turns);
+  }
+  const reset = key !== id || !(after >= 0) || after > items.length;
+  const from = reset ? 0 : after;
+  if (!reset && from === items.length) return { key: id, total: items.length, unchanged: true };
+  return { key: id, total: items.length, from, reset, provider: provider.id, items: items.slice(from) };
 }
 
 // 訪客看綁定 session 的「乾淨版對話記錄」（ticket 認證，在 token middleware 之前）。
@@ -294,6 +364,18 @@ app.get('/api/sessions/:id/conversation', async (req, res) => {
   if (!session) return res.status(404).json({ error: 'session 不存在或已結束' });
   try {
     res.json(await readSessionConversation(session));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 對話視圖（終端｜對話 互切）的增量 items。?key=<上次的 key>&after=<已收到筆數>
+app.get('/api/sessions/:id/chat', async (req, res) => {
+  const session = registry.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'session 不存在或已結束' });
+  try {
+    const after = req.query.after === undefined ? -1 : parseInt(req.query.after, 10);
+    res.json(await readSessionChat(session, String(req.query.key || ''), after));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
