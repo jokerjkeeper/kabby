@@ -628,6 +628,72 @@
     #host-convo-btn.on { background: #2d5a4a; color: #cdebdf; }
     .cv-empty { color: #777; text-align: center; padding: 40px 20px; line-height: 1.8; }
 
+    /* ── 對話視圖（pane 內「終端｜對話」互切；chat-view.js）── */
+    #view-toggle-btn.on { background: #2d5a4a; color: #cdebdf; }
+    .chat-pane {
+      position: absolute; inset: 0; z-index: 5;   /* 疊在 xterm 上：終端尺寸不變、切回不用 refit */
+      background: #1e1e1e; display: flex; flex-direction: column;
+    }
+    .term-pane.chat-mode > .pane-close { z-index: 6; }
+    .chat-scroll {
+      flex: 1; overflow-y: auto; padding: 14px 18px 8px;
+      scrollbar-width: thin; scrollbar-color: #444 transparent;
+    }
+    .chat-list { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+    .cv-msg.user { display: flex; justify-content: flex-end; }
+    .cv-bubble {
+      max-width: 80%; white-space: pre-wrap; word-break: break-word;
+      background: #1d2b26; border: 1px solid #2d4a3e; border-radius: 8px;
+      padding: 8px 12px; color: #e0e0e0; font-size: 13px; line-height: 1.55;
+    }
+    .cv-msg.assistant .cv-text { border-left: 3px solid #c08552; border-radius: 0 6px 6px 0; }
+    .cv-card {
+      border: 1px solid #333; border-radius: 6px; background: #232324; font-size: 12px;
+    }
+    .cv-card-head {
+      display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer;
+      font-family: 'Cascadia Code', Consolas, monospace; color: #bbb; min-width: 0;
+    }
+    .cv-card-head:hover { background: #2a2a2b; }
+    .cv-card .cv-ico { color: #888; width: 12px; text-align: center; }
+    .cv-card .cv-name { color: #e0e0e0; font-weight: 600; }
+    .cv-card .cv-sum { flex: 1; min-width: 0; color: #8f8f8f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cv-card .cv-st { flex: 0 0 auto; }
+    .cv-st.ok { color: #4caf50; } .cv-st.err { color: #e06c6c; } .cv-st.run { color: #d7ba7d; }
+    .cv-card-body { display: none; padding: 0 10px 8px; }
+    .cv-card.open .cv-card-body { display: block; }
+    .cv-card.open { border-color: #444; }
+    .cv-file { color: #9cdcfe; font-family: 'Cascadia Code', Consolas, monospace; margin: 4px 0; word-break: break-all; }
+    .cv-pre {
+      margin: 4px 0; padding: 6px 8px; background: #161616; border: 1px solid #2c2c2c; border-radius: 4px;
+      font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; line-height: 1.45;
+      white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto; color: #ccc;
+    }
+    .cv-pre.del { background: #2b1b1b; border-color: #5a2d2d; color: #f0b8b8; }
+    .cv-pre.add { background: #1b2b1e; border-color: #2d5a35; color: #b8f0c0; }
+    .cv-pre.err { border-color: #5a2d2d; color: #f0b8b8; }
+    .cv-result-label { color: #777; font-size: 11px; margin-top: 6px; }
+    .cv-todos { list-style: none; margin: 4px 0; padding: 0; color: #ccc; }
+    .cv-todos li.completed { color: #777; text-decoration: line-through; }
+    .cv-todos li.in_progress { color: #d7ba7d; }
+    .cv-skip { color: #777; font-size: 11px; text-align: center; padding: 4px; }
+    .chat-banner {
+      display: flex; align-items: center; gap: 10px; justify-content: center;
+      padding: 6px 12px; background: #3a3220; color: #f0d890; font-size: 12px; border-top: 1px solid #5a4a2a;
+    }
+    .chat-input { flex: 0 0 auto; border-top: 1px solid #333; padding: 8px 12px 10px; background: #1b1b1b; }
+    .chat-input textarea {
+      width: 100%; box-sizing: border-box; resize: none; background: #232324; color: #e0e0e0;
+      border: 1px solid #3a3a3a; border-radius: 6px; padding: 8px 10px; outline: none;
+      font-family: inherit; font-size: 13px; line-height: 1.5;
+    }
+    .chat-input textarea:focus { border-color: #c08552; }
+    .chat-actions { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+    .chat-actions .spacer { flex: 1; }
+    .chat-state { color: #888; font-size: 12px; }
+    .chat-dots::after { content: '…'; animation: chatDots 1.2s steps(3) infinite; display: inline-block; width: 1.2em; overflow: hidden; vertical-align: bottom; }
+    @keyframes chatDots { 0% { width: .4em; } 100% { width: 1.2em; } }
+
     /* ── 監控頁（modal overlay）─────────────────────────────────────── */
     .modal.monitor {
       min-width: 0; width: 92vw; max-width: 1200px; height: 88vh;
@@ -921,6 +987,7 @@
       <span id="meta" style="color:#888"></span>
       <button id="split-h-btn" class="btn" style="display:none" title="左右分割焦點 pane（Ctrl+Shift+D）">切左右</button>
       <button id="split-v-btn" class="btn" style="display:none" title="上下分割焦點 pane（Ctrl+Shift+E）">切上下</button>
+      <button id="view-toggle-btn" class="btn" style="display:none" title="焦點 pane 在「終端｜對話」之間切換（對話視圖讀 cc 的對話存檔；權限確認與 / 選單仍需在終端操作）">💬 對話</button>
       <button id="voice-term-btn" class="btn" style="display:none" title="🎙 按住說話，放開後把文字打進焦點終端（不會自動按 Enter，確認後自己按 Enter 送出）">🎙 說話</button>
       <button id="redraw-btn" class="btn" style="display:none" title="送 Ctrl+L 給 cc 重繪畫面（多 client size 不同造成 TUI 殘留時用）">重繪</button>
       <button id="kill-btn" class="btn danger" style="display:none" title="殺掉這個 PTY（所有 client 會斷開，cc session 結束）">殺 session</button>
@@ -1211,6 +1278,7 @@
   <script src="https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js"></script>
   <script src="https://unpkg.com/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
   <script src="/convo-view.js"></script>
+  <script src="/chat-view.js"></script>
   <script src="/voice.js"></script>
   <script src="/app.js"></script>
 </body>

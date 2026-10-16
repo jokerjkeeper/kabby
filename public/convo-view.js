@@ -106,6 +106,9 @@
     }).join('');
   }
 
+  // 給對話視圖（chat-view.js）共用同一套 markdown 渲染
+  window.KabbyMd = { render: renderMarkdown, escapeHtml };
+
   const hasText = (t) => !!(t.text && t.text.trim());
   const hasTools = (t) => !!(t.tools && t.tools.length);
 

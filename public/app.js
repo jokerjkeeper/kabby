@@ -150,6 +150,7 @@
     onToast: (text, kind) => showToast(text, kind),
   });
   const splitHBtn = document.getElementById('split-h-btn');
+  const viewToggleBtn = document.getElementById('view-toggle-btn');
   const splitVBtn = document.getElementById('split-v-btn');
   const openViewerBtn = document.getElementById('open-viewer-btn');
   const tabListEl = document.getElementById('tab-list');
@@ -675,7 +676,8 @@
     el.addEventListener('mousedown', () => focusLeaf(paneId));
 
     const leaf = { kind: 'leaf', paneId, el, sessionId: sessionId || null, info: info || null,
-                   term: null, fit: null, host: null, ws: null, connected: false, _ph: null };
+                   term: null, fit: null, host: null, ws: null, connected: false, _ph: null,
+                   view: 'term', chat: null };
     leaves.set(paneId, leaf);
     if (sessionId) wireLeafTerminal(leaf);
     else showEmptyPlaceholder(leaf);
@@ -736,6 +738,63 @@
     leaf.ro = ro;
     scheduleLeafFit(leaf);
     connect(leaf);
+    if (loadLeafView(leaf.sessionId) === 'chat') setLeafView(leaf, 'chat');
+  }
+
+  // ── 終端｜對話 互切（對話視圖在 chat-view.js；cc 照樣跑在 PTY）──
+  function loadLeafView(sid) {
+    try { return localStorage.getItem('kabby.view.' + sid) || 'term'; } catch { return 'term'; }
+  }
+  function saveLeafView(sid, view) {
+    try {
+      if (view === 'chat') localStorage.setItem('kabby.view.' + sid, 'chat');
+      else localStorage.removeItem('kabby.view.' + sid);
+    } catch {}
+  }
+  function ensureLeafChat(leaf) {
+    if (leaf.chat) return leaf.chat;
+    leaf.chat = window.createChatView({
+      host: leaf.el,
+      fetchChat: (key, after) => {
+        const q = '?key=' + encodeURIComponent(key || '') + '&after=' + after;
+        return apiFetch('/api/sessions/' + encodeURIComponent(leaf.sessionId) + '/chat' + q).then(async (r) => {
+          const body = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(body.error || 'HTTP ' + r.status);
+          return body;
+        });
+      },
+      send: (data) => {
+        if (!leaf.ws || leaf.ws.readyState !== WebSocket.OPEN) return false;
+        leaf.ws.send(JSON.stringify({ type: 'input', data }));
+        return true;
+      },
+      onSwitchToTerm: () => setLeafView(leaf, 'term'),
+      onToast: (text, kind) => showToast(text, kind),
+      bindVoice: (btn, onText) => voice.bind(btn, {
+        isAllowed: () => true,
+        title: '🎙 按住說話，放開後把文字放進輸入框（不會自動送出）',
+        onText,
+      }),
+    });
+    return leaf.chat;
+  }
+  function setLeafView(leaf, view) {
+    if (!leaf || !leaf.sessionId) return;
+    leaf.view = view === 'chat' ? 'chat' : 'term';
+    saveLeafView(leaf.sessionId, leaf.view);
+    leaf.el.classList.toggle('chat-mode', leaf.view === 'chat');
+    if (leaf.view === 'chat') {
+      ensureLeafChat(leaf).show();
+    } else {
+      if (leaf.chat) leaf.chat.hide();
+      scheduleLeafFit(leaf);
+      if (leaf.term) { try { leaf.term.focus(); } catch {} }
+    }
+    if (focusedPaneId === leaf.paneId) updateStatusbar(leaf);
+  }
+  function toggleFocusedView() {
+    const leaf = leaves.get(focusedPaneId);
+    if (leaf) setLeafView(leaf, leaf.view === 'chat' ? 'term' : 'chat');
   }
 
   // 依 pane 當前尺寸 refit；rAF 去抖、隱藏中（0 尺寸）跳過
@@ -927,7 +986,8 @@
     const leaf = leaves.get(paneId);
     const tab = activeTab();
     if (tab) for (const l of leavesOf(tab.root)) l.el.classList.toggle('focused', l.paneId === paneId);
-    if (leaf && leaf.term) { try { leaf.term.focus(); } catch {} }
+    if (leaf && leaf.view === 'chat' && leaf.chat) leaf.chat.focus();
+    else if (leaf && leaf.term) { try { leaf.term.focus(); } catch {} }
     updateStatusbar(leaf || null);
     renderTabs();
     leafLiveSync(); // 焦點換了 → live 小面板跟著移到新 pane
@@ -1128,6 +1188,7 @@
     try { leaf.ro && leaf.ro.disconnect(); } catch {}
     try { leaf.ws && leaf.ws.close(); } catch {}
     try { leaf.term && leaf.term.dispose(); } catch {}
+    try { leaf.chat && leaf.chat.dispose(); } catch {}
     leaves.delete(leaf.paneId);
     if (pendingFillPaneId === leaf.paneId) pendingFillPaneId = null;
   }
@@ -1216,6 +1277,7 @@
       killBtn.style.display = 'none';
       redrawBtn.style.display = 'none';
       voiceTermBtn.style.display = 'none';
+      viewToggleBtn.style.display = 'none';
       splitHBtn.style.display = leaf ? '' : 'none';
       splitVBtn.style.display = leaf ? '' : 'none';
       return;
@@ -1230,6 +1292,9 @@
     killBtn.style.display = '';
     redrawBtn.style.display = '';
     voiceTermBtn.style.display = '';
+    viewToggleBtn.style.display = '';
+    viewToggleBtn.textContent = leaf.view === 'chat' ? '⌨ 終端' : '💬 對話';
+    viewToggleBtn.classList.toggle('on', leaf.view === 'chat');
     voice.refresh();   // 焦點 pane 連線狀態變了 → 🎙 可用狀態跟著變
     splitHBtn.style.display = '';
     splitVBtn.style.display = '';
@@ -1434,10 +1499,12 @@
     onText: (text) => {
       const leaf = focusedLeafWritable();
       if (!leaf) { showToast('焦點 pane 已斷線，語音內容未送出', 'warn'); return; }
+      if (leaf.view === 'chat' && leaf.chat) { leaf.chat.appendText(text); return; }
       leaf.ws.send(JSON.stringify({ type: 'input', data: window.KabbyVoice.toTerminalText(text) }));
       if (leaf.term) leaf.term.focus();
     },
   });
+  viewToggleBtn.addEventListener('click', toggleFocusedView);
   splitHBtn.addEventListener('click', () => splitFocused('row'));
   splitVBtn.addEventListener('click', () => splitFocused('col'));
 

@@ -265,6 +265,7 @@ registerProcessor('kabby-capture', Capture);`;
       const el = document.activeElement;
       if (!el) return false;
       if (el.classList && el.classList.contains('xterm-helper-textarea')) return false;   // xterm 的隱藏輸入 = 終端
+      if (el.dataset && el.dataset.voiceHotkey) return false;   // 對話視圖輸入框：等同終端，快捷鍵照常
       return el.matches && el.matches('input, textarea, [contenteditable="true"]');
     }
 
