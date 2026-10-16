@@ -101,6 +101,29 @@ Request body：
 成功：`{ "ok": true }`
 找不到：`404`
 
+### `GET /api/sessions/:id/chat?key=&after=`
+
+對話視圖用的增量 items（token 認證）。daemon 把 kabby session 對應到 cc 的對話存檔（resume 的 id，或 PTY 啟動後才建立的那份；`/clear` 開新檔會跟過去），逐 content block 展平。
+
+- `key`：上次回應的 `key`（對話存檔 id）；第一次帶空字串
+- `after`：已收到的 item 數；第一次帶 `-1`
+
+```json
+{ "key": "<cc session id>", "total": 42, "from": 40, "reset": false, "provider": "claude",
+  "items": [
+    { "kind": "user", "text": "…", "ts": "…" },
+    { "kind": "assistant", "text": "markdown…", "model": "…", "ts": "…" },
+    { "kind": "tool", "id": "toolu_…", "name": "Read", "input": { "file_path": "…" }, "ts": "…" },
+    { "kind": "result", "toolUseId": "toolu_…", "content": "…", "isError": false, "ts": "…" }
+  ] }
+```
+
+- 沒有新資料：`{ key, total, unchanged: true }`
+- `key` 與上次不同（`/clear` 換檔）或 `after` 超出：`reset: true`，`items` 從頭給
+- 還沒有存檔：`{ notFound: true }`；provider 不支援：`{ unsupported: true }`
+- 工具 input 與 result 的長字串截斷在 4096 字；thinking、sidechain（subagent）、meta 訊息與 slash 指令輸出不列入
+- Codex 目前由摘要降級：工具只有 `input.hint`，沒有 result
+
 ## Profiles API（Phase 2.5）
 
 項目（profile）= 保存的 session 啟動配置 (name, cwd, cmd, args)。存在 `%USERPROFILE%\.kabby\profiles.json`，daemon 重啟保留。

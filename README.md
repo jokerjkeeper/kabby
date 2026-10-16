@@ -82,6 +82,17 @@ npm run dist        # 打包成 Windows portable exe
 - **Provider**：Claude Code 與 Codex 都能開，建 session 時選
 - **敏感詞攔截**：送出的輸入在伺服器端比對詞庫，命中直接擋下不進 PTY
 
+### 對話視圖（終端｜對話 互切）
+
+狀態列「💬 對話」把焦點 pane 從 xterm 切成對話式介面，cc 照樣跑在同一個 PTY，隨時可以切回「⌨ 終端」：
+
+- **工具卡片**：Read / Glob / Grep / Bash… 一行一張，✓ / ✗ 顯示結果；點開看參數與輸出，Edit 類顯示紅綠 diff
+- **markdown 回覆**：表格、程式碼區塊、清單照常渲染
+- **輸入框**：Enter 送出、Shift+Enter 換行（多行會當成一則訊息送出）；🎙 與 `Ctrl`+`Shift`+`V` 的轉寫文字放進輸入框；「⏹ 中斷」等同在終端按 Esc
+- **資料來源**：daemon 增量讀 cc 的對話存檔（`~/.claude/projects/**/*.jsonl`），約 1.5 秒內出現；`/clear` 開新存檔會自動跟過去
+- **限制**：回覆是整段出現、不是逐字串流；權限確認、`/` 指令選單等 TUI 互動仍要切回終端（工具久無結果時會出現提示條）。Codex 目前只顯示工具名稱，沒有結果
+- 每個 session 記住上次的視圖（存在瀏覽器）
+
 ### Chat
 
 主頁右上「聊天室」開右側面板：建立房間、綁定一個運行中 session、設一組入房 key。
@@ -159,6 +170,12 @@ node test/smoke.js
 ```
 
 用 `cmd.exe` 代替 cc 跑（不依賴 claude 是否安裝），驗證：HTTP API 建立/刪除 session、兩個 WS client 同連一個 session 的 fan-out、第三個 client 後加入能收到 scrollback replay、`clientCount` 正確反映 attach 數。
+
+```bash
+node test/cc-chat-items.js
+```
+
+對話視圖的 jsonl → items 解析（不需 daemon）：工具呼叫與結果配對、meta / slash 指令輸出濾除、長內容截斷、增量讀檔（半行不誤吞、檔案重寫重解析）。
 
 ## Architecture
 

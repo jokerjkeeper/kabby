@@ -82,6 +82,17 @@ User data lives in `~/.kabby/`: `profiles.json` (project list), `sensitive-words
 - **Providers**: launch either Claude Code or Codex, chosen when the session is created
 - **Input blocklist**: outgoing input is matched against a word list server-side; a hit is dropped before it reaches the PTY
 
+### Chat view (terminal | chat toggle)
+
+The "💬 對話" button in the status bar turns the focused pane from xterm into a chat-style view. cc keeps running in the same PTY, and "⌨ 終端" switches back at any time:
+
+- **Tool cards**: one line per Read / Glob / Grep / Bash… call with ✓ / ✗; click to see the input and output, with a red/green diff for edits
+- **Markdown replies**: tables, code blocks and lists render as usual
+- **Input box**: Enter sends, Shift+Enter adds a newline (multi-line text goes out as one message); 🎙 and `Ctrl`+`Shift`+`V` put the transcript into the box; "⏹ 中斷" is the same as pressing Esc in the terminal
+- **Data source**: the daemon incrementally reads cc's transcript (`~/.claude/projects/**/*.jsonl`), so updates show up within ~1.5 s; after `/clear` it follows the new transcript automatically
+- **Limits**: replies appear whole, not streamed token by token; permission prompts, `/` command menus and other TUI interactions still need the terminal (a banner appears when a tool has been waiting for a while). Codex shows tool names only, without results
+- Each session remembers its last view (stored in the browser)
+
 ### Chat
 
 The chat button at the top right opens a side panel: create a room, bind it to a running session, set an entry key.
@@ -159,6 +170,12 @@ node test/smoke.js
 ```
 
 Runs `cmd.exe` in place of cc (so it does not depend on claude being installed) and verifies: creating/deleting sessions over the HTTP API, fan-out between two WS clients on one session, scrollback replay for a third client joining later, and `clientCount` tracking attachments correctly.
+
+```bash
+node test/cc-chat-items.js
+```
+
+Chat-view parsing of the jsonl into items (no daemon needed): tool calls paired with results, meta / slash-command output filtered, long content truncated, incremental reads (partial lines kept for later, rewritten files re-parsed).
 
 ## Architecture
 

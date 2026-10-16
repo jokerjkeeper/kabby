@@ -82,6 +82,17 @@ npm run dist        # 打包成 Windows portable exe
 - **Provider**：Claude Code 与 Codex 都能开，建会话时选
 - **敏感词拦截**：发送的输入在服务端比对词库，命中直接拦下，不进 PTY
 
+### 对话视图（终端｜对话 互切）
+
+状态栏「💬 對話」把焦点 pane 从 xterm 切成对话式界面，cc 照样跑在同一个 PTY，随时可以切回「⌨ 終端」：
+
+- **工具卡片**：Read / Glob / Grep / Bash… 一行一张，✓ / ✗ 显示结果；点开看参数与输出，Edit 类显示红绿 diff
+- **markdown 回复**：表格、代码块、列表照常渲染
+- **输入框**：Enter 发送、Shift+Enter 换行（多行会作为一条消息发送）；🎙 与 `Ctrl`+`Shift`+`V` 的转写文字放进输入框；「⏹ 中斷」等同在终端按 Esc
+- **数据来源**：daemon 增量读取 cc 的对话存档（`~/.claude/projects/**/*.jsonl`），约 1.5 秒内出现；`/clear` 开新存档会自动跟过去
+- **限制**：回复是整段出现、不是逐字流式；权限确认、`/` 命令菜单等 TUI 交互仍要切回终端（工具久无结果时会出现提示条）。Codex 目前只显示工具名称，没有结果
+- 每个会话记住上次的视图（存在浏览器）
+
 ### Chat
 
 主页右上「聊天室」打开右侧面板：创建房间、绑定一个运行中的会话、设一组入房 key。
@@ -159,6 +170,12 @@ node test/smoke.js
 ```
 
 用 `cmd.exe` 代替 cc 运行（不依赖 claude 是否安装），验证：HTTP API 创建/删除会话、两个 WS client 连同一个会话的 fan-out、第三个 client 后加入能收到 scrollback replay、`clientCount` 正确反映 attach 数。
+
+```bash
+node test/cc-chat-items.js
+```
+
+对话视图的 jsonl → items 解析（不需要 daemon）：工具调用与结果配对、meta / slash 命令输出过滤、长内容截断、增量读文件（半行不误吞、文件重写重新解析）。
 
 ## Architecture
 
