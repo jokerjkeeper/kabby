@@ -235,10 +235,11 @@ app.post('/api/rooms/join', (req, res) => {
 });
 
 // 把一個運行中的 kabby session 對應到它的 cc/codex 對話存檔 id。
-// 定位規則：resume 的先用該 id；否則取該 cwd 下「PTY 啟動後仍有更新」的最新一份
-//（cc 啟動即建檔、活躍中 mtime 持續前進）。結果快取在 session.ccSessionId。
-// cc 的 /clear 會另開新 jsonl → claude 每 3 秒便宜地重看一次目錄（只 readdir+stat），
-// 發現「啟動後更新、未被其他 live session 佔用、且比目前這份更新」的檔就換過去。
+// claude：取該 cwd 下「PTY 啟動後才建立」（birthtime）且未被其他 live session 佔用的最新一份。
+// 用建立時間而非 mtime：同 cwd 若有 kabby 外的 cc 正在跑，它的舊檔 mtime 也一直前進，會搶走綁定。
+// cc 的 /clear 會另開新 jsonl → 每 3 秒便宜地重看一次目錄（只 readdir+stat），
+// 出現「比目前這份更晚建立」的檔就換過去。resume 的起點是 resumeSessionId（建立得早，/clear 後一樣會換）。
+// codex：沿用舊規則（PTY 啟動後仍有更新的最新一份），定位後不再換。結果快取在 session.ccSessionId。
 const CONVO_RECHECK_MS = 3000;
 async function resolveConvoId(session, provider) {
   let current = session.ccSessionId || session.resumeSessionId || null;
@@ -254,20 +255,24 @@ async function resolveConvoId(session, provider) {
       if (other.resumeSessionId) claimed.add(other.resumeSessionId);
       if (other.ccSessionId) claimed.add(other.ccSessionId);
     }
+    const BORN_SLACK_MS = 2000;   // 時鐘/檔案系統時間解析度誤差
     let best = null;
-    let currentMtime = -1;
+    let currentBorn = -1;
     let names = [];
     try { names = fs.readdirSync(dir); } catch {}
     for (const name of names) {
       if (!name.endsWith('.jsonl')) continue;
       const id = name.slice(0, -6);
-      let mtime;
-      try { mtime = fs.statSync(path.join(dir, name)).mtimeMs; } catch { continue; }
-      if (id === current) { currentMtime = mtime; continue; }
-      if (mtime < started || claimed.has(id)) continue;
-      if (!best || mtime > best.mtime) best = { id, mtime };
+      let born;
+      try {
+        const st = fs.statSync(path.join(dir, name));
+        born = st.birthtimeMs || st.mtimeMs;   // 不支援 birthtime 的檔案系統退回 mtime
+      } catch { continue; }
+      if (id === current) { currentBorn = born; continue; }
+      if (born < started - BORN_SLACK_MS || claimed.has(id)) continue;
+      if (!best || born > best.born) best = { id, born };
     }
-    if (best && best.mtime > currentMtime) current = best.id;
+    if (best && best.born > currentBorn) current = best.id;
   } else if (!current) {
     const items = await history.listHistory(provider.id, session.cwd);
     const started = new Date(session.createdAt).getTime();

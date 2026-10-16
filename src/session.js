@@ -13,6 +13,16 @@ const INPUT_MATCHER_TTL = 3000; // 敏感詞 matcher 快取（避免每個 keyst
 const COLS_MIN = 20, COLS_MAX = 500;
 const ROWS_MIN = 5, ROWS_MAX = 200;
 
+// 從某個 cc 裡啟動 daemon（例如在 cc 的 Bash 跑 npm start）時，會繼承那個 cc 的「本 session 專屬」
+// 環境標記；PTY 裡的 cc 會因此把自己當成子 session（例如 CLAUDE_CODE_CHILD_SESSION → 不寫對話存檔，
+// 對話記錄/對話視圖就讀不到）。kabby 開的是獨立的頂層 cc → 這些標記一律不往下傳。
+const PARENT_SESSION_ENV = /^(CLAUDECODE|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_CODE_(CHILD_SESSION|SESSION_ID|SESSION_ATTENDED|MESSAGING_SOCKET|MESSAGING_TOKEN|ENTRYPOINT|EXECPATH))$/;
+function childEnv() {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!PARENT_SESSION_ENV.test(k)) env[k] = v;
+  return env;
+}
+
 function clampDim(value, fallback, min, max) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -55,7 +65,7 @@ class Session extends EventEmitter {
         name: 'xterm-256color',
         cols, rows,
         cwd: this.cwd,
-        env: process.env,
+        env: childEnv(),
       });
     } catch (err) {
       const raw = err && err.message ? err.message : String(err);
