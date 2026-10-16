@@ -17,6 +17,8 @@
   const POLL_MS = 1500;
   const WAIT_HINT_MS = 3000;     // 工具超過這麼久沒結果 → 提示「終端可能在等你」
   const MAX_INITIAL = 400;       // 首次載入只畫最後 N 筆（長 session 的 DOM 護欄）
+  const FOLD_LINES = 12;         // 長訊息摺疊門檻
+  const FOLD_CHARS = 800;
   const md = () => window.KabbyMd;
 
   function esc(s) { return md().escapeHtml(s == null ? '' : String(s)); }
@@ -129,6 +131,27 @@
       if (c.el.classList.contains('open')) c.el.querySelector('.cv-card-body').innerHTML = cardBody(c);
     }
 
+    // 長訊息可摺疊：超過 FOLD_LINES 行或 FOLD_CHARS 字才加「展開 / 收合」鈕。
+    // 使用者訊息預設收合（常是貼上的長文、背景任務通知），回覆預設展開。
+    function makeFoldable(wrap, content, text, collapsed) {
+      const lines = String(text).split('\n').length;
+      if (lines <= FOLD_LINES && text.length <= FOLD_CHARS) return;
+      content.classList.add('cv-fold');
+      const btn = document.createElement('button');
+      btn.className = 'cv-fold-btn';
+      const paint = (c) => {
+        content.classList.toggle('collapsed', c);
+        btn.textContent = c ? `▾ 展開全文（${lines} 行）` : '▴ 收合';
+      };
+      btn.addEventListener('click', () => {
+        const willCollapse = !content.classList.contains('collapsed');
+        paint(willCollapse);
+        if (willCollapse) wrap.scrollIntoView({ block: 'nearest' });   // 收合後別讓畫面停在一片空白
+      });
+      paint(collapsed);
+      wrap.appendChild(btn);
+    }
+
     function renderItem(it) {
       if (it.kind === 'result') {
         const c = it.toolUseId && cards.get(it.toolUseId);
@@ -139,9 +162,11 @@
       if (it.kind === 'user') {
         el.className = 'cv-msg user';
         el.innerHTML = `<div class="cv-bubble">${esc(it.text)}</div>`;
+        makeFoldable(el, el.firstChild, it.text, true);
       } else if (it.kind === 'assistant') {
         el.className = 'cv-msg assistant';
         el.innerHTML = `<div class="cv-text md">${md().render(it.text)}</div>`;
+        makeFoldable(el, el.firstChild, it.text, false);
       } else if (it.kind === 'tool') {
         el.className = 'cv-card';
         const sum = toolSummary(it.input);
