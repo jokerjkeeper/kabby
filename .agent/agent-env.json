@@ -1,0 +1,4 @@
+{
+  "_note": "AgentPacks agent-env 管理。改 agent 請在 launcher「Agent 套件」重新安裝 agent-env；手改本檔後要執行 python .agent/scripts/sync_agent_skills.py 重生入口。",
+  "agents": ["claude","codex"]
+}

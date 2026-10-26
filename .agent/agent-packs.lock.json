@@ -1,0 +1,200 @@
+{
+  "schema": 2,
+  "packs": {
+    "git-spec": {
+      "name": "Git 提交規範",
+      "version": "1.0.0",
+      "source": {
+        "kind": "local",
+        "version": "local"
+      },
+      "params": {},
+      "preset": null,
+      "installedAt": "2026-10-16T02:23:08.994Z",
+      "files": {
+        ".agent/spec/git.md": "df7cc9681223685d2e82376fa5408728bfdbdb1a5965a72b513d3ba751ee66b2"
+      },
+      "entries": {}
+    },
+    "agent-env": {
+      "name": "Agent 環境（claude / codex / opencode）",
+      "version": "1.1.0",
+      "source": {
+        "id": "primary",
+        "kind": "local",
+        "version": "local"
+      },
+      "params": {
+        "project": "kabby",
+        "agents": [
+          "claude",
+          "codex"
+        ]
+      },
+      "preset": null,
+      "installedAt": "2026-10-26T09:10:29.929Z",
+      "files": {
+        ".agent/agent-env.json": "bb5db19acdb71d45e99f2bc2b7cd2095fbda14270af8c37c5d77218dbd1351a4",
+        ".agent/scripts/sync_agent_skills.py": "896aa8d1d226b8c6f31bb8370647d592521dccac37ec72c27ed0b84bfbc9dd08",
+        ".agent/spec/layout.md": "20604e4feff4ec40eaf884537f52bea4e011ab54708a5dc2ba362be25008f545"
+      },
+      "entries": {},
+      "skills": [],
+      "specs": [
+        {
+          "file": "layout.md",
+          "title": "專案目錄約定（非程式目錄）",
+          "load": "auto",
+          "when": "新增頂層目錄、放文件 / 設計稿 / 暫存檔，或判斷哪裡是程式碼時"
+        }
+      ],
+      "blocks": [
+        "CLAUDE.md"
+      ]
+    },
+    "dev-base": {
+      "name": "開發基礎規範（規則 + Session）",
+      "version": "1.0.0",
+      "source": {
+        "id": "primary",
+        "kind": "local",
+        "version": "local"
+      },
+      "params": {},
+      "preset": null,
+      "installedAt": "2026-10-26T09:10:29.938Z",
+      "files": {
+        ".agent/capabilities/skills/save/SKILL.md": "351aecb190e847e367823a79a0f4a69ca6f26dc099eec491aa4d2e61280f4a94",
+        ".agent/capabilities/skills/resume/SKILL.md": "4c8eecf05b8fb3ac7d083b9b559c1552290e2001ff84a8e5125a89778e3aaa77",
+        ".agent/capabilities/skills/bye/SKILL.md": "9c0d9f5991c64d7888cad40fb1dea33d6823fb7c9ae9fdc4ce91a3ca3ada7e04",
+        ".agent/capabilities/skills/task/SKILL.md": "7c8b5e847b70c7e43a6e65bf8b469fda36a5065e9a175494e80e542c03eeb53e",
+        ".agent/capabilities/skills/roadmap/SKILL.md": "fcc2e66cfd2c72e094eb24f2ce37f9e224798b8359097ae7263ee3b9acb3dc73",
+        ".agent/capabilities/skills/report/SKILL.md": "51b17a30e2e1baa202b9bb5b7eff17aa2baed86c77b6c25900651808adba0ebe",
+        ".agent/capabilities/skills/conv/SKILL.md": "efa83c6abd682ba99bb78b208cda6e28246aeaa84ba766824b349504c30a8562",
+        ".agent/capabilities/skills/readme/SKILL.md": "a11802540a5f637612d0309ab1791ac4466ff15663c6ff80c718378420900a2e",
+        ".agent/capabilities/skills/review/SKILL.md": "03a35f30492fb0db6ef477a56c0deedb0b8ec03fbe251f7837a4bc30c6d06db5",
+        ".agent/spec/coding.md": "5e924800abc58881235e86b94c59646cf4d47ad7f018ec7d3abaf528df275bc5",
+        ".agent/spec/session.md": "d8dc1b6a597500da5335b9473501b66eca268eec70e6c9fd58122ebd7cd84733"
+      },
+      "entries": {
+        ".claude/skills/save/SKILL.md": "683359d14d63d91bfe507c1c4aefb71ca88c9e589991e953eb3a69268c9a0e44",
+        ".agents/skills/save/SKILL.md": "683359d14d63d91bfe507c1c4aefb71ca88c9e589991e953eb3a69268c9a0e44",
+        ".claude/skills/resume/SKILL.md": "0008463fb59041c3777dafd16963cffd884619e12f994cd9555940e23a6bc32c",
+        ".agents/skills/resume/SKILL.md": "0008463fb59041c3777dafd16963cffd884619e12f994cd9555940e23a6bc32c",
+        ".claude/skills/bye/SKILL.md": "e6f8a0839e59f967128ba5ebc7dcfd36b9ed3d4eb2f2abb2c6bf056698ec5c80",
+        ".agents/skills/bye/SKILL.md": "e6f8a0839e59f967128ba5ebc7dcfd36b9ed3d4eb2f2abb2c6bf056698ec5c80",
+        ".claude/skills/task/SKILL.md": "667bdc19a638379180c96c93b9dc57dc049fd93eaf56b719d278e9c0510b9617",
+        ".agents/skills/task/SKILL.md": "667bdc19a638379180c96c93b9dc57dc049fd93eaf56b719d278e9c0510b9617",
+        ".claude/skills/roadmap/SKILL.md": "3dc3276215c8f48bc97aac5398305589862d61aee31d637c1a0b3cfeccc01f48",
+        ".agents/skills/roadmap/SKILL.md": "3dc3276215c8f48bc97aac5398305589862d61aee31d637c1a0b3cfeccc01f48",
+        ".claude/skills/report/SKILL.md": "ea5918674568c2db5778f850d49615e5652d143e8bccfe30ef2527d78929ca39",
+        ".agents/skills/report/SKILL.md": "ea5918674568c2db5778f850d49615e5652d143e8bccfe30ef2527d78929ca39",
+        ".claude/skills/conv/SKILL.md": "23545d215220800dbe8b3d511ad34f0ce5c03fcc5c87e8310a8035894f0dd06d",
+        ".agents/skills/conv/SKILL.md": "23545d215220800dbe8b3d511ad34f0ce5c03fcc5c87e8310a8035894f0dd06d",
+        ".claude/skills/readme/SKILL.md": "e4629fcb76f124819dbed8f1bb528c7eb5412177c6b5c334b009df4f9a745735",
+        ".agents/skills/readme/SKILL.md": "e4629fcb76f124819dbed8f1bb528c7eb5412177c6b5c334b009df4f9a745735",
+        ".claude/skills/review/SKILL.md": "dc16091e8421a18f6769bd1b95740645beaa4f73828ae151ca1ce77bfaa4c883",
+        ".agents/skills/review/SKILL.md": "dc16091e8421a18f6769bd1b95740645beaa4f73828ae151ca1ce77bfaa4c883"
+      },
+      "skills": [
+        "save",
+        "resume",
+        "bye",
+        "task",
+        "roadmap",
+        "report",
+        "conv",
+        "readme",
+        "review"
+      ],
+      "specs": [
+        {
+          "file": "coding.md",
+          "title": "通用開發規則",
+          "load": "auto",
+          "when": "寫程式、搜尋檔案、串接 API、執行任務時"
+        },
+        {
+          "file": "session.md",
+          "title": "Session 進度規範（快照 / 歷史 / ROADMAP）",
+          "load": "ondemand",
+          "when": "寫入或整理 .agent/session.md、session-log、ROADMAP 時（save / resume / roadmap skill 會讀）"
+        }
+      ],
+      "blocks": [
+        "AGENTS.md"
+      ]
+    },
+    "wp-skills": {
+      "name": "WePages / TaskHub 工單指令",
+      "version": "1.0.1",
+      "source": {
+        "id": "primary",
+        "kind": "local",
+        "version": "local"
+      },
+      "params": {},
+      "preset": null,
+      "installedAt": "2026-10-26T09:10:29.943Z",
+      "files": {
+        ".agent/capabilities/skills/wp/SKILL.md": "3c1eb524960bcf03c0b766e69c935466693a4655cb4189334cc73a23b28e8924",
+        ".agent/capabilities/skills/wp-verify/SKILL.md": "31652bc4a09025f2a631951245d01e611117281369085e6c3c27acab4457e6e3",
+        ".agent/capabilities/skills/wp-attach/SKILL.md": "696910bc57db9d84817c95fa7268117381e5a4df7636d6f569a39788f7646b17",
+        ".agent/capabilities/skills/wp-cleanup/SKILL.md": "83f83a22ee206c0e0b6ca3b094e03ebb799efd587fdca4a8d9b779698c099985",
+        ".agent/capabilities/skills/auto-execute/SKILL.md": "aa49ce4a1d134acf1bb09098413cd597d81641dcdfdeb83deb834fab203dbfb9"
+      },
+      "entries": {
+        ".claude/skills/wp/SKILL.md": "e98a569bce61f351543a924071f29198c4a23b4ece46a4200b1bdbbcc7c64e33",
+        ".agents/skills/wp/SKILL.md": "e98a569bce61f351543a924071f29198c4a23b4ece46a4200b1bdbbcc7c64e33",
+        ".claude/skills/wp-verify/SKILL.md": "0ca034f9eeb472427a4a6fcaf2ed38ef79b41e4bd1298a29729ec77a0455e936",
+        ".agents/skills/wp-verify/SKILL.md": "0ca034f9eeb472427a4a6fcaf2ed38ef79b41e4bd1298a29729ec77a0455e936",
+        ".claude/skills/wp-attach/SKILL.md": "bb3a2248f71068c2bcf9a970f7a6c66d0cec04208a1aedde0fa58e2ed89b5511",
+        ".agents/skills/wp-attach/SKILL.md": "bb3a2248f71068c2bcf9a970f7a6c66d0cec04208a1aedde0fa58e2ed89b5511",
+        ".claude/skills/wp-cleanup/SKILL.md": "e94259d2c97bb980a7035779a9949a53c95ac5dc2aefbfea0ac9686b10f372bf",
+        ".agents/skills/wp-cleanup/SKILL.md": "e94259d2c97bb980a7035779a9949a53c95ac5dc2aefbfea0ac9686b10f372bf",
+        ".claude/skills/auto-execute/SKILL.md": "8fe01fffc4e26e93b19eedccd74ede017429031b5dfc00b6d4a5bc370da923f9",
+        ".agents/skills/auto-execute/SKILL.md": "8fe01fffc4e26e93b19eedccd74ede017429031b5dfc00b6d4a5bc370da923f9"
+      },
+      "skills": [
+        "wp",
+        "wp-verify",
+        "wp-attach",
+        "wp-cleanup",
+        "auto-execute"
+      ],
+      "specs": [],
+      "blocks": []
+    },
+    "wepages": {
+      "name": "WePages 工單（task 綁定）",
+      "version": "1.2.0",
+      "source": {
+        "id": "primary",
+        "kind": "local",
+        "version": "local"
+      },
+      "params": {
+        "url": "http://127.0.0.1:5002",
+        "task_ids": "141,121",
+        "project_id": "",
+        "project_name": "分工"
+      },
+      "preset": null,
+      "installedAt": "2026-10-26T09:15:12.243Z",
+      "files": {
+        ".agent/spec/wepages.md": "c2ab21cabd2d72cfeeffd9cef2ecb12f3c7557b51ae4b10164ca9eb9a4235783"
+      },
+      "entries": {},
+      "skills": [],
+      "specs": [
+        {
+          "file": "wepages.md",
+          "title": "WePages / TaskHub 工單 API",
+          "load": "ondemand",
+          "when": "查詢、建立、更新工單或驗收清單時"
+        }
+      ],
+      "blocks": []
+    }
+  }
+}

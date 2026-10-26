@@ -1,0 +1,16 @@
+{
+  "_note": "專案目錄約定（AgentPacks agent-env 產生，歸專案所有，可手改）。reserved_dirs = 頂層「非程式」目錄，'.*' 代表所有點開頭目錄；source_exts = 視為程式碼的副檔名。launcher 依此偵測 code_roots（掃 reserved 以外、含程式檔的頂層目錄）。說明見 .agent/spec/layout.md。",
+  "reserved_dirs": [
+    ".*",
+    "design", "aispec", "docs", "doc", "temp", "tmp",
+    "raw", "wiki", "outputs", "spec", "specs",
+    "node_modules", "dist", "build", "out", "coverage", "venv", "__pycache__",
+    "Library", "Temp", "Logs", "obj", "bin"
+  ],
+  "source_exts": [
+    ".cs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte",
+    ".py", ".go", ".rs", ".java", ".kt", ".swift",
+    ".c", ".cc", ".cpp", ".h", ".hpp", ".m", ".mm",
+    ".lua", ".php", ".rb", ".dart", ".gd"
+  ]
+}
