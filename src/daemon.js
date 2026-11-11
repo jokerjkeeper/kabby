@@ -16,7 +16,7 @@ const codexCollector = require('./codex-collector');
 const codexHistory = require('./codex-history');
 const { createWatcher } = require('./usage-watcher');
 const providers = require('./providers');
-const { createFilesRouter } = require('./files');
+const { createFilesRouter, parseFilesConfig } = require('./files');
 
 // 監控 provider 路由：?provider=codex → codex 採集器，其餘（含未帶）→ claude。
 function collectorFor(provider) {
@@ -38,8 +38,11 @@ const ALLOWED_ORIGINS = (process.env.KABBY_ALLOWED_ORIGINS || '')
 // 語音輸入（🎙 按住說話）的 STT 服務（Voicebox / Whisper）；daemon 代理轉發，瀏覽器不直連
 const STT_URL = (process.env.KABBY_STT_URL || 'http://127.0.0.1:17493').replace(/\/+$/, '');
 const STT_TIMEOUT_MS = parseInt(process.env.KABBY_STT_TIMEOUT_MS || '60000', 10) || 60000;
-// 唯讀檔案下載服務（/api/files）：未設 KABBY_FILES_ROOT = 關閉
-const FILES_ROOT = process.env.KABBY_FILES_ROOT || null;
+// 唯讀檔案下載服務（/api/files）：KABBY_FILES_ROOTS（多根）優先，其次 KABBY_FILES_ROOT（單根）；都沒設 = 關閉
+const FILES_CONFIG = parseFilesConfig({
+  root: process.env.KABBY_FILES_ROOT,
+  roots: process.env.KABBY_FILES_ROOTS,
+});
 const FILES_ALLOW_IPS = process.env.KABBY_FILES_ALLOW_IPS || '';
 
 // token 取自：X-Kabby-Token header / Authorization: Bearer <token> / ?token= query
@@ -357,7 +360,7 @@ app.use('/api', (req, res, next) => {
 });
 
 // 唯讀檔案下載（token 之後；另有代理 header 拒絕 + IP 白名單 + 路徑檢查，見 src/files.js）
-app.use('/api/files', createFilesRouter({ root: FILES_ROOT, allowIps: FILES_ALLOW_IPS }));
+app.use('/api/files', createFilesRouter({ config: FILES_CONFIG, allowIps: FILES_ALLOW_IPS }));
 
 app.get('/api/providers', (req, res) => {
   res.json(providers.listProviders());
@@ -946,13 +949,28 @@ function handleConnection(ws, session, guestCtx) {
 httpServer.listen(PORT, HOST, () => {
   console.log(`kabby daemon listening on http://${HOST}:${PORT}`);
   console.log(AUTH_TOKEN ? '[auth] AUTH_TOKEN enabled — /api + WS 需要 token' : '[auth] AUTH_TOKEN 未設 — 不鎖（僅適合本機）');
-  console.log(FILES_ROOT
-    ? `[files] /api/files 啟用 root=${FILES_ROOT} allow=${FILES_ALLOW_IPS || '(不限)'}`
-    : '[files] KABBY_FILES_ROOT 未設 — /api/files 關閉');
+  logFilesConfig();
   // 背景採集：監看 cc / codex JSONL，檔案一變就增量入庫（B 方案常駐採集）
   ccWatcher.start();
   codexWatcher.start();
 });
+
+/** 啟動時印 /api/files 設定狀態（設定錯誤只停用該功能，不影響 daemon） */
+function logFilesConfig() {
+  const allow = FILES_ALLOW_IPS || '(不限)';
+  for (const w of FILES_CONFIG.warnings) console.warn(`[files] 警告：${w}`);
+  if (FILES_CONFIG.errors.length) {
+    for (const e of FILES_CONFIG.errors) console.error(`[files] 設定錯誤：${e}`);
+    console.error('[files] KABBY_FILES_ROOTS 不合規 — /api/files 停用');
+  } else if (FILES_CONFIG.mode === 'multi') {
+    const list = FILES_CONFIG.roots.map((r) => `${r.name}:${r.abs}`).join(', ');
+    console.log(`[files] /api/files 啟用 roots=${list} allow=${allow}`);
+  } else if (FILES_CONFIG.mode === 'single') {
+    console.log(`[files] /api/files 啟用 root=${FILES_CONFIG.roots[0].abs} allow=${allow}`);
+  } else {
+    console.log('[files] KABBY_FILES_ROOT(S) 未設 — /api/files 關閉');
+  }
+}
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

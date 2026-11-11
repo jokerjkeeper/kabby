@@ -328,10 +328,22 @@ curl -H "X-Kabby-Token: $AUTH_TOKEN" -F file=@hello.wav -F language=zh http://lo
 
 | 變數 | 說明 |
 |---|---|
-| `KABBY_FILES_ROOT` | 分享的根目錄（絕對路徑，例 `D:\models-share`）。**未設 = 功能關閉**，`/api/files/*` 一律 `404` |
+| `KABBY_FILES_ROOTS` | 多個分享根目錄，`名稱=絕對路徑` 以分號分隔（例 `repo=J:\Git\gpu-bridge;models=D:\models-share`），每項以第一個 `=` 切開。名稱限 `[a-z0-9_-]+`、不可重複；路徑必須是已存在的目錄。**不合規 → 啟動時印錯誤並停用 `/api/files`**（daemon 照常啟動） |
+| `KABBY_FILES_ROOT` | 舊的單一根目錄（絕對路徑，例 `D:\models-share`），路徑不帶名稱前綴。與 `KABBY_FILES_ROOTS` 同時設時以 ROOTS 為準並印警告 |
 | `KABBY_FILES_ALLOW_IPS` | 來源 IP 白名單，逗號分隔（例 `10.1.129.112`）；空 = 不限。`::ffff:10.1.129.112` 這類 IPv4-mapped IPv6 會自動比對成 IPv4 |
 
-daemon 要讓別台機器連得到，需 `HOST=0.0.0.0` 並設 `AUTH_TOKEN`。
+兩個都沒設 = 功能關閉，`/api/files/*` 一律 `404`。daemon 要讓別台機器連得到，需 `HOST=0.0.0.0` 並設 `AUTH_TOKEN`。
+
+### 路徑格式
+
+| 模式 | 請求的 `path` | 回應裡的 `path` |
+|---|---|---|
+| 多根（`KABBY_FILES_ROOTS`） | 第一段是根目錄名稱：`repo/executor/pull.py`、`models/hf/vae/x.safetensors` | 一律帶名稱前綴，可直接拿去打 `stat` / `raw` |
+| 單根（`KABBY_FILES_ROOT`） | 相對根目錄：`sdxl/model.safetensors` | 相對根目錄 |
+
+- 多根模式下，名稱區分大小寫；未知名稱 → `404 { "error": "unknown root" }`。
+- 名稱後面的部分照下面的路徑檢查，`realpath` 不可逃出**該名稱對應的根目錄**。所以就算 `repo` 裡有指向 `models` 的 junction，也會被擋成 `400`，請改用 `models/...` 路徑。
+- sha256 快取以實際檔案路徑為 key，與名稱無關。
 
 ### 安全規則（依序檢查）
 
@@ -346,20 +358,36 @@ daemon 要讓別台機器連得到，需 `HOST=0.0.0.0` 並設 `AUTH_TOKEN`。
 
 ### `GET /api/files/list?path=<相對目錄>&recursive=1`
 
-`path` 省略 = 根目錄。`recursive=1` 遞迴列出（最多 100,000 筆，超過時多回 `"truncated": true`）。不跟進 symlink / junction。`entries[].path` 是**相對根目錄**的路徑，可直接拿去打 `stat` / `raw`。
+`recursive=1` 遞迴列出（最多 100,000 筆，超過時多回 `"truncated": true`）。不跟進 symlink / junction。`entries[].path` 的格式見上方「路徑格式」，可直接拿去打 `stat` / `raw`。
+
+**多根模式，`path` 省略或空字串 → 根清單**：每個根目錄一筆，`root` 為 `null`，不回絕對路徑。帶 `recursive=1` 也只列這一層，不往下掃。
 
 ```json
 {
-  "root": "models-share",
-  "path": "sdxl",
+  "root": null,
+  "path": "",
   "entries": [
-    { "path": "sdxl/model.safetensors", "size": 6938078334, "mtime": "2026-11-11T03:12:45.123Z", "isDir": false },
-    { "path": "sdxl/vae", "size": 0, "mtime": "2026-11-11T03:10:01.000Z", "isDir": true }
+    { "path": "repo", "size": 0, "mtime": "2026-11-11T02:00:00.000Z", "isDir": true },
+    { "path": "models", "size": 0, "mtime": "2026-11-11T03:10:01.000Z", "isDir": true }
   ]
 }
 ```
 
-`root` 只是根目錄名稱（不含絕對路徑）。`path` 指向檔案 → `400 { "error": "not a directory" }`。
+**列某個目錄**（多根模式，`?path=models/hf&recursive=1`）：
+
+```json
+{
+  "root": "models",
+  "path": "models/hf",
+  "entries": [
+    { "path": "models/hf/vae", "size": 0, "mtime": "2026-11-11T03:10:01.000Z", "isDir": true },
+    { "path": "models/hf/vae/x.safetensors", "size": 6938078334, "mtime": "2026-11-11T03:12:45.123Z", "isDir": false }
+  ]
+}
+```
+
+- `root` 是根目錄名稱。單根模式下 `path` 省略 = 根目錄，`root` 是根目錄的資料夾名稱，`path` 不帶前綴。
+- `path` 指向檔案 → `400 { "error": "not a directory" }`。
 
 ### `GET /api/files/stat?path=<檔案>&hash=1`
 

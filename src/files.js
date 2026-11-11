@@ -6,6 +6,7 @@
  *   GET /api/files/stat?path=&hash=1        檔案資訊 + sha256（快取 / 串流計算）
  *   GET /api/files/raw?path=                串流下載，支援 Range 斷點續傳
  *
+ * 分享根目錄：KABBY_FILES_ROOTS（多根，路徑第一段是名稱）或舊的 KABBY_FILES_ROOT（單根）。
  * 掛在 daemon 的 token middleware 之後，沿用 AUTH_TOKEN。本模組再加三道關：
  *   1. 帶 cf-connecting-ip / x-forwarded-for 的請求（經 tunnel / 代理轉入）一律 403
  *   2. KABBY_FILES_ALLOW_IPS 白名單（看 socket 位址，不信任 header）
@@ -82,43 +83,110 @@ function splitUserPath(raw, { required }) {
   return segs;
 }
 
+const ROOT_NAME_RE = /^[a-z0-9_-]+$/;
+
+/** 是否為絕對路徑（Windows 用 win32 規則：磁碟代號 / UNC） */
+function isAbsPath(p) {
+  return IS_WINDOWS ? path.win32.isAbsolute(p) : path.isAbsolute(p);
+}
+
+/**
+ * 解析 /api/files 設定（啟動時呼叫一次）。
+ * - roots（KABBY_FILES_ROOTS）：`名稱=路徑;名稱=路徑`，路徑第一段當名稱選根目錄（multi 模式）
+ * - root（KABBY_FILES_ROOT）：舊的單一根目錄，路徑不帶名稱前綴（single 模式）
+ * 兩個都設以 roots 為準。設定不合規 → mode='off' 並回 errors（daemon 照常啟動，只停用 /api/files）。
+ * @returns {{ mode:'off'|'single'|'multi', roots:{name:string, abs:string}[], errors:string[], warnings:string[] }}
+ */
+function parseFilesConfig({ root, roots } = {}) {
+  const result = { mode: 'off', roots: [], errors: [], warnings: [] };
+  const rootsStr = String(roots || '').trim();
+  const rootStr = String(root || '').trim();
+
+  if (rootsStr) {
+    if (rootStr) result.warnings.push('KABBY_FILES_ROOT 與 KABBY_FILES_ROOTS 都有設，以 KABBY_FILES_ROOTS 為準');
+    const seen = new Set();
+    for (const item of rootsStr.split(';').map((x) => x.trim()).filter(Boolean)) {
+      const eq = item.indexOf('=');
+      if (eq <= 0) { result.errors.push(`格式錯誤（應為 名稱=路徑）：${item}`); continue; }
+      const name = item.slice(0, eq).trim();
+      const dir = item.slice(eq + 1).trim();
+      if (!ROOT_NAME_RE.test(name)) { result.errors.push(`名稱不合法（限 a-z 0-9 _ -）：${name}`); continue; }
+      if (seen.has(name)) { result.errors.push(`名稱重複：${name}`); continue; }
+      seen.add(name);
+      if (!dir || !isAbsPath(dir)) { result.errors.push(`${name} 的路徑必須是絕對路徑：${dir}`); continue; }
+      let st = null;
+      try { st = fs.statSync(dir); } catch {}
+      if (!st || !st.isDirectory()) { result.errors.push(`${name} 的路徑不存在或不是目錄：${dir}`); continue; }
+      result.roots.push({ name, abs: path.resolve(dir) });
+    }
+    if (!result.errors.length && !result.roots.length) result.errors.push('KABBY_FILES_ROOTS 沒有任何根目錄');
+    if (result.errors.length) result.roots = [];
+    else result.mode = 'multi';
+    return result;
+  }
+
+  if (rootStr) {
+    const abs = path.resolve(rootStr);
+    result.roots.push({ name: path.basename(abs) || abs.replace(/[\\/:]+/g, ''), abs });
+    result.mode = 'single';
+  }
+  return result;
+}
+
 /**
  * 建立 /api/files router。
  * @param {object} opts
- * @param {string|null} opts.root       分享根目錄（未設 = 功能關閉，全部 404）
+ * @param {string|null} [opts.root]     舊的單一分享根目錄（KABBY_FILES_ROOT）
+ * @param {string|null} [opts.roots]    多根目錄（KABBY_FILES_ROOTS，`名稱=路徑;…`），有設以它為準
+ * @param {object} [opts.config]        已解析好的 parseFilesConfig() 結果（給了就不再解析 root / roots）
  * @param {string} [opts.allowIps]      逗號分隔 IP 白名單（空 = 不限）
  * @param {(line:string)=>void} [opts.log]  存取日誌輸出（預設 stderr）
+ * 設定為 off（未設或不合規）時全部回 404。
  */
-function createFilesRouter({ root, allowIps = '', log = (line) => console.error(line) } = {}) {
+function createFilesRouter({ root, roots, config, allowIps = '', log = (line) => console.error(line) } = {}) {
   const router = express.Router();
+  const cfg = config || parseFilesConfig({ root, roots });
 
-  if (!root) {
+  if (cfg.mode === 'off') {
     router.use((req, res) => res.status(404).json({ error: 'files service disabled' }));
     return router;
   }
 
+  const multi = cfg.mode === 'multi';
+  const rootByName = new Map(cfg.roots.map((r) => [r.name, r]));
   const allowSet = parseAllowIps(allowIps);
-  const rootAbs = path.resolve(root);
-  const rootName = path.basename(rootAbs) || rootAbs.replace(/[\\/:]+/g, '');
   const hashCache = new Map();    // key → sha256 hex
   const hashInflight = new Map(); // key → Promise<sha256 hex>
 
-  /** 取 root 的 realpath（每次請求取，root 被搬動 / 換 junction 也正確） */
-  async function getRootReal() {
+  /** 取根目錄的 realpath（每次請求取，根目錄被搬動 / 換 junction 也正確） */
+  async function getRootReal(rootDef) {
     try {
-      return await fs.promises.realpath(rootAbs);
+      return await fs.promises.realpath(rootDef.abs);
     } catch {
       throw new FilesError(503, 'files root unavailable');
     }
   }
 
+  /** 對外路徑：multi 模式加上「名稱/」前綴 */
+  function publicPath(rootDef, relInRoot) {
+    if (!multi) return relInRoot;
+    return relInRoot ? `${rootDef.name}/${relInRoot}` : rootDef.name;
+  }
+
   /**
-   * 使用者路徑 → { rootReal, real, rel, st }。
-   * realpath 後確認仍在 root 底下（防 symlink / junction 逃逸），且解析後不落在點開頭的檔案或目錄。
+   * 使用者路徑 → { rootDef, rootReal, real, relInRoot, rel, st }；multi 模式且路徑為空時回 { isRootList:true }。
+   * realpath 後確認仍在「該名稱對應的根目錄」底下（防 symlink / junction 逃逸），且解析後不落在點開頭的檔案或目錄。
    */
   async function resolveUserPath(raw, { required }) {
-    const segs = splitUserPath(raw, { required });
-    const rootReal = await getRootReal();
+    let segs = splitUserPath(raw, { required });
+    let rootDef = cfg.roots[0];
+    if (multi) {
+      if (!segs.length) return { isRootList: true };
+      rootDef = rootByName.get(segs[0]);
+      if (!rootDef) throw new FilesError(404, 'unknown root');
+      segs = segs.slice(1);
+    }
+    const rootReal = await getRootReal(rootDef);
     const candidate = path.resolve(rootReal, ...segs);
     if (!isInside(rootReal, candidate)) throw new FilesError(400, 'invalid path');
     let real;
@@ -129,10 +197,22 @@ function createFilesRouter({ root, allowIps = '', log = (line) => console.error(
       throw new FilesError(400, 'invalid path');
     }
     if (!isInside(rootReal, real)) throw new FilesError(400, 'invalid path');
-    const rel = toRel(rootReal, real);
-    if (rel.split('/').some((s) => s.startsWith('.'))) throw new FilesError(404, 'not found');
+    const relInRoot = toRel(rootReal, real);
+    if (relInRoot.split('/').some((s) => s.startsWith('.'))) throw new FilesError(404, 'not found');
     const st = await fs.promises.stat(real);
-    return { rootReal, real, rel, st };
+    return { rootDef, rootReal, real, relInRoot, rel: publicPath(rootDef, relInRoot), st };
+  }
+
+  /** multi 模式根清單：每個根目錄一筆（不回絕對路徑；暫時無法存取的根略過） */
+  async function listRoots() {
+    const entries = [];
+    for (const rootDef of cfg.roots) {
+      try {
+        const st = await fs.promises.stat(await getRootReal(rootDef));
+        entries.push({ path: rootDef.name, size: 0, mtime: st.mtime.toISOString(), isDir: true });
+      } catch {}
+    }
+    return { root: null, path: '', entries };
   }
 
   /** 串流計算 sha256；同一檔（key 相同）正在算時共用同一個 Promise */
@@ -186,7 +266,10 @@ function createFilesRouter({ root, allowIps = '', log = (line) => console.error(
   // GET /list?path=<相對目錄>&recursive=1
   router.get('/list', async (req, res) => {
     try {
-      const { rootReal, real, rel, st } = await resolveUserPath(req.query.path, { required: false });
+      const resolved = await resolveUserPath(req.query.path, { required: false });
+      // multi 模式根清單：只列第一層名稱，不遞迴（避免一次掃整棵上百 GB 的樹）
+      if (resolved.isRootList) return res.json(await listRoots());
+      const { rootDef, rootReal, real, rel, st } = resolved;
       if (!st.isDirectory()) throw new FilesError(400, 'not a directory');
       const recursive = req.query.recursive === '1' || req.query.recursive === 'true';
       const entries = [];
@@ -214,7 +297,7 @@ function createFilesRouter({ root, allowIps = '', log = (line) => console.error(
           }
           if (entries.length >= LIST_LIMIT) { truncated = true; break; }
           entries.push({
-            path: toRel(rootReal, abs),
+            path: publicPath(rootDef, toRel(rootReal, abs)),
             size: d.isDirectory() ? 0 : est.size,
             mtime: est.mtime.toISOString(),
             isDir: d.isDirectory(),
@@ -222,7 +305,7 @@ function createFilesRouter({ root, allowIps = '', log = (line) => console.error(
           if (recursive && d.isDirectory()) stack.push(abs);
         }
       }
-      const body = { root: rootName, path: rel, entries };
+      const body = { root: rootDef.name, path: rel, entries };
       if (truncated) body.truncated = true;
       res.json(body);
     } catch (err) {
@@ -273,11 +356,11 @@ function createFilesRouter({ root, allowIps = '', log = (line) => console.error(
       });
     });
     try {
-      const { rootReal, rel, st } = await resolveUserPath(req.query.path, { required: true });
+      const { rootReal, relInRoot, rel, st } = await resolveUserPath(req.query.path, { required: true });
       relForLog = rel;
       if (!st.isFile()) throw new FilesError(400, 'not a file');
       // 傳相對路徑 + root：dotfiles 檢查只看 root 以下的部分（root 本身路徑含點目錄也不受影響）
-      res.sendFile(rel, { root: rootReal, dotfiles: 'deny', acceptRanges: true, lastModified: true, etag: true }, (err) => {
+      res.sendFile(relInRoot, { root: rootReal, dotfiles: 'deny', acceptRanges: true, lastModified: true, etag: true }, (err) => {
         if (!err) return;
         if (err.code === 'ECONNABORTED' || err.code === 'ECONNRESET' || res.destroyed) return;   // 用戶端斷線
         errored = true;
@@ -297,4 +380,4 @@ function createFilesRouter({ root, allowIps = '', log = (line) => console.error(
   return router;
 }
 
-module.exports = { createFilesRouter, normalizeIp, splitUserPath, isInside };
+module.exports = { createFilesRouter, parseFilesConfig, normalizeIp, splitUserPath, isInside };
