@@ -69,9 +69,9 @@ npm run dist        # 打包成 Windows portable exe
 | `KABBY_VIEWER_PATH` | （未设） | cc history viewer 的 portable exe 绝对路径；设置后 UI 上的「viewer」按钮才会启用 |
 | `KABBY_STT_URL` | `http://127.0.0.1:17493` | 🎙 语音输入用的 STT 服务（Voicebox / Whisper）地址，由 daemon 代理转发 |
 | `KABBY_STT_TIMEOUT_MS` | `60000` | 单次语音转写的超时（毫秒） |
-| `KABBY_FILES_ROOTS` | （未设） | `/api/files` 多个共享根目录，`名称=绝对路径` 以分号分隔（例 `repo=J:\Git\gpu-bridge;models=D:\models-share`），路径第一段为名称；设了时优先于 `KABBY_FILES_ROOT` |
+| `KABBY_FILES_ROOTS` | （未设） | `/api/files` 多个共享根目录，`名称=绝对路径` 以分号分隔（例 `repo=D:\work\project;models=D:\shared\models`），路径第一段为名称；设了时优先于 `KABBY_FILES_ROOT` |
 | `KABBY_FILES_ROOT` | （未设 = 关闭） | 只读文件下载服务 `/api/files` 的共享根目录（绝对路径），见 [docs/api.md](docs/api.md) |
-| `KABBY_FILES_ALLOW_IPS` | （空 = 不限） | `/api/files` 的来源 IP 白名单，逗号分隔（例 `10.1.129.112`） |
+| `KABBY_FILES_ALLOW_IPS` | （空 = 不限） | `/api/files` 的来源 IP 白名单，逗号分隔（例 `192.168.1.20`） |
 | `KABBY_FILES_LOG_DIR` | `~/.kabby/logs/files` | `/api/files` 审计日志目录（JSONL 每日一档，含被拒请求，不记 token）；实时监控见主页侧栏「📦」 |
 | `KABBY_FILES_LOG_DAYS` | `30` | 审计日志保留天数 |
 

@@ -328,9 +328,9 @@ curl -H "X-Kabby-Token: $AUTH_TOKEN" -F file=@hello.wav -F language=zh http://lo
 
 | 變數 | 說明 |
 |---|---|
-| `KABBY_FILES_ROOTS` | 多個分享根目錄，`名稱=絕對路徑` 以分號分隔（例 `repo=J:\Git\gpu-bridge;models=D:\models-share`），每項以第一個 `=` 切開。名稱限 `[a-z0-9_-]+`、不可重複；路徑必須是已存在的目錄。**不合規 → 啟動時印錯誤並停用 `/api/files`**（daemon 照常啟動） |
-| `KABBY_FILES_ROOT` | 舊的單一根目錄（絕對路徑，例 `D:\models-share`），路徑不帶名稱前綴。與 `KABBY_FILES_ROOTS` 同時設時以 ROOTS 為準並印警告 |
-| `KABBY_FILES_ALLOW_IPS` | 來源 IP 白名單，逗號分隔（例 `10.1.129.112`）；空 = 不限。`::ffff:10.1.129.112` 這類 IPv4-mapped IPv6 會自動比對成 IPv4 |
+| `KABBY_FILES_ROOTS` | 多個分享根目錄，`名稱=絕對路徑` 以分號分隔（例 `repo=D:\work\project;models=D:\shared\models`），每項以第一個 `=` 切開。名稱限 `[a-z0-9_-]+`、不可重複；路徑必須是已存在的目錄。**不合規 → 啟動時印錯誤並停用 `/api/files`**（daemon 照常啟動） |
+| `KABBY_FILES_ROOT` | 舊的單一根目錄（絕對路徑，例 `D:\shared\models`），路徑不帶名稱前綴。與 `KABBY_FILES_ROOTS` 同時設時以 ROOTS 為準並印警告 |
+| `KABBY_FILES_ALLOW_IPS` | 來源 IP 白名單，逗號分隔（例 `192.168.1.20`）；空 = 不限。`::ffff:192.168.1.20` 這類 IPv4-mapped IPv6 會自動比對成 IPv4 |
 
 兩個都沒設 = 功能關閉，`/api/files/*` 一律 `404`。daemon 要讓別台機器連得到，需 `HOST=0.0.0.0` 並設 `AUTH_TOKEN`。
 
@@ -413,7 +413,7 @@ curl -H "X-Kabby-Token: $AUTH_TOKEN" -F file=@hello.wav -F language=zh http://lo
 # 取前 100 bytes（回 206、長度 100）
 curl -H "X-Kabby-Token: $AUTH_TOKEN" -r 0-99 "http://127.0.0.1:3700/api/files/raw?path=sdxl/model.safetensors" -o part.bin
 # 斷點續傳
-curl -H "X-Kabby-Token: $AUTH_TOKEN" -C - "http://10.1.129.104:3700/api/files/raw?path=sdxl/model.safetensors" -o model.safetensors
+curl -H "X-Kabby-Token: $AUTH_TOKEN" -C - "http://192.168.1.10:3700/api/files/raw?path=sdxl/model.safetensors" -o model.safetensors
 ```
 
 ### 稽核日誌（JSONL）
@@ -426,9 +426,9 @@ curl -H "X-Kabby-Token: $AUTH_TOKEN" -C - "http://10.1.129.104:3700/api/files/ra
 | `KABBY_FILES_LOG_DAYS` | `30` | 保留天數；啟動時與每 24 小時清掉更舊的 `files-*.jsonl` |
 
 ```json
-{"ts":"2026-11-11T13:19:49.183Z","ip":"10.1.129.112","method":"GET","endpoint":"raw","path":"models/w.bin","range":"bytes=0-99","status":206,"bytes":100,"size":3000000,"ms":13,"result":"ok"}
-{"ts":"2026-11-11T13:19:49.228Z","ip":"10.1.129.50","method":"GET","endpoint":"list","status":401,"ms":0,"result":"denied","reason":"bad_token"}
-{"ts":"2026-11-11T13:19:49.272Z","ip":"10.1.129.112","method":"GET","endpoint":"raw","path":"repo/../models/w.bin","status":400,"bytes":0,"ms":1,"result":"denied","reason":"invalid_path"}
+{"ts":"2026-11-11T13:19:49.183Z","ip":"192.168.1.20","method":"GET","endpoint":"raw","path":"models/w.bin","range":"bytes=0-99","status":206,"bytes":100,"size":3000000,"ms":13,"result":"ok"}
+{"ts":"2026-11-11T13:19:49.228Z","ip":"192.168.1.99","method":"GET","endpoint":"list","status":401,"ms":0,"result":"denied","reason":"bad_token"}
+{"ts":"2026-11-11T13:19:49.272Z","ip":"192.168.1.20","method":"GET","endpoint":"raw","path":"repo/../models/w.bin","status":400,"bytes":0,"ms":1,"result":"denied","reason":"invalid_path"}
 ```
 
 | 欄位 | 說明 |
@@ -451,7 +451,7 @@ curl -H "X-Kabby-Token: $AUTH_TOKEN" -C - "http://10.1.129.104:3700/api/files/ra
 stderr 另外保留一行簡要日誌（只記 `raw` 與 `hash`）：
 
 ```
-[files] 2026-11-11T03:20:11.002Z ip=10.1.129.112 raw path=models/w.bin range=bytes=0-99 status=206 bytes=100 ms=3 ok
+[files] 2026-11-11T03:20:11.002Z ip=192.168.1.20 raw path=models/w.bin range=bytes=0-99 status=206 bytes=100 ms=3 ok
 ```
 
 ### `GET /api/files/activity`
@@ -462,7 +462,7 @@ stderr 另外保留一行簡要日誌（只記 `raw` 與 `hash`）：
 {
   "enabled": true,
   "active": [
-    { "id": 7, "ip": "10.1.129.112", "path": "models/hf/vae/x.safetensors", "range": "bytes=1048576-",
+    { "id": 7, "ip": "192.168.1.20", "path": "models/hf/vae/x.safetensors", "range": "bytes=1048576-",
       "sent": 524288000, "total": 6937029758, "startedAt": "2026-11-11T13:20:01.000Z", "mibps": 104.2 }
   ],
   "hashing": [
@@ -471,12 +471,12 @@ stderr 另外保留一行簡要日誌（只記 `raw` 與 `hash`）：
   "recent": [ { "ts": "…", "ip": "…", "endpoint": "raw", "status": 206, "result": "ok", "…": "同 JSONL 欄位，最新在前，最多 200 筆" } ],
   "stats": {
     "since": "2026-11-11T13:00:00.000Z", "requests": 42, "bytesSent": 21474836480,
-    "bytesByIp": { "10.1.129.112": 21474836480 },
+    "bytesByIp": { "192.168.1.20": 21474836480 },
     "byStatus": { "200": 30, "206": 8, "401": 2, "400": 2 },
     "denied": 4, "deniedByReason": { "bad_token": 2, "invalid_path": 2 }
   },
   "log": { "enabled": true, "writable": true, "days": 30 },
-  "config": { "mode": "multi", "roots": ["repo", "models"], "allowIps": ["10.1.129.112"] }
+  "config": { "mode": "multi", "roots": ["repo", "models"], "allowIps": ["192.168.1.20"] }
 }
 ```
 

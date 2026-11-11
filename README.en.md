@@ -69,9 +69,9 @@ Environment variables (put them in `.env`; see `.env.example`):
 | `KABBY_VIEWER_PATH` | (unset) | Absolute path to the cc history viewer executable; enables the "viewer" button in the UI |
 | `KABBY_STT_URL` | `http://127.0.0.1:17493` | STT service (Voicebox / Whisper) used by 🎙 voice input; the daemon proxies requests to it |
 | `KABBY_STT_TIMEOUT_MS` | `60000` | Timeout for a single transcription, in milliseconds |
-| `KABBY_FILES_ROOTS` | (unset) | Multiple shared roots for `/api/files`: `name=absolute-path` separated by `;` (e.g. `repo=J:\Git\gpu-bridge;models=D:\models-share`); the first path segment selects the root. Takes precedence over `KABBY_FILES_ROOT` |
+| `KABBY_FILES_ROOTS` | (unset) | Multiple shared roots for `/api/files`: `name=absolute-path` separated by `;` (e.g. `repo=D:\work\project;models=D:\shared\models`); the first path segment selects the root. Takes precedence over `KABBY_FILES_ROOT` |
 | `KABBY_FILES_ROOT` | (unset = disabled) | Root directory (absolute path) shared by the read-only file download service `/api/files`; see [docs/api.md](docs/api.md) |
-| `KABBY_FILES_ALLOW_IPS` | (empty = any) | Comma-separated source IP allowlist for `/api/files` (e.g. `10.1.129.112`) |
+| `KABBY_FILES_ALLOW_IPS` | (empty = any) | Comma-separated source IP allowlist for `/api/files` (e.g. `192.168.1.20`) |
 | `KABBY_FILES_LOG_DIR` | `~/.kabby/logs/files` | Audit log directory for `/api/files` (daily JSONL, includes denied requests, never logs tokens); live monitor via the sidebar "📦" button |
 | `KABBY_FILES_LOG_DAYS` | `30` | Audit log retention in days |
 
