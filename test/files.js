@@ -14,7 +14,7 @@ const net = require('net');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const express = require('express');
-const { createFilesRouter } = require('../src/files');
+const { createFilesRouter, parseFilesConfig } = require('../src/files');
 
 const TOKEN = 'test-files-token';
 const DAEMON = path.join(__dirname, '..', 'src', 'daemon.js');
@@ -69,6 +69,7 @@ function startDaemon(port, fx) {
       HOST: '127.0.0.1',
       AUTH_TOKEN: TOKEN,
       KABBY_FILES_ROOT: fx.root,
+      KABBY_FILES_ROOTS: '',   // 擋掉本機 .env 的多根設定，這段測單根模式
       KABBY_FILES_ALLOW_IPS: '127.0.0.1,::1',
       HOME: fx.home,
       USERPROFILE: fx.home,
@@ -251,8 +252,124 @@ async function main() {
     srvDeny.close(); srvMapped.close(); srvOff.close();
   }
 
+  await testMultiRoots(fx, ok);
+
   fs.rmSync(fx.base, { recursive: true, force: true });
   console.log(`\nfiles: ${passed} 項全部通過`);
+}
+
+/** KABBY_FILES_ROOTS 多根目錄：設定解析 + 兩個根各自 list / stat / raw + 跨根逃逸 */
+async function testMultiRoots(fx, ok) {
+  // fixture：repo（腳本 + .git + 指向 models 的 junction）、models（權重檔）
+  const repo = path.join(fx.base, 'repo');
+  const models = path.join(fx.base, 'models');
+  fs.mkdirSync(path.join(repo, 'executor'), { recursive: true });
+  fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(models, 'hf', 'vae'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'executor', 'pull.py'), 'print("pull")\n');
+  fs.writeFileSync(path.join(repo, '.git', 'config'), '[core]');
+  const weights = crypto.randomBytes(64 * 1024 + 3);
+  fs.writeFileSync(path.join(models, 'hf', 'vae', 'x.safetensors'), weights);
+  let hasLink = false;
+  try {
+    fs.symlinkSync(models, path.join(repo, 'models-link'), process.platform === 'win32' ? 'junction' : 'dir');
+    hasLink = true;
+  } catch {}
+
+  // --- parseFilesConfig ---
+  let cfg = parseFilesConfig({ roots: `repo=${repo};models=${models}` });
+  assert.strictEqual(cfg.mode, 'multi');
+  assert.deepStrictEqual(cfg.roots.map((r) => r.name), ['repo', 'models']);
+  assert.deepStrictEqual([cfg.errors, cfg.warnings], [[], []]);
+  cfg = parseFilesConfig({ roots: ` repo = ${repo} ; ; models=${models};` });
+  assert.strictEqual(cfg.mode, 'multi', '容許空白與多餘分號');
+  const bads = [
+    [`repo=${repo};repo=${models}`, '名稱重複'],
+    [`Repo=${repo}`, '名稱不合法'],
+    [`re po=${repo}`, '名稱不合法'],
+    [`repo=${path.join(fx.base, 'nope')}`, '不存在'],
+    [`repo=${path.join(repo, 'executor', 'pull.py')}`, '不是目錄'],
+    ['repo=relative\\dir', '絕對路徑'],
+    [`${repo}`, '格式錯誤'],
+  ];
+  for (const [value, expectMsg] of bads) {
+    cfg = parseFilesConfig({ roots: value });
+    assert.strictEqual(cfg.mode, 'off', value);
+    assert.ok(cfg.errors.some((e) => e.includes(expectMsg)), `${value} → ${cfg.errors.join(' / ')}`);
+  }
+  cfg = parseFilesConfig({ root: fx.root, roots: `models=${models}` });
+  assert.strictEqual(cfg.mode, 'multi');
+  assert.strictEqual(cfg.warnings.length, 1);
+  assert.strictEqual(parseFilesConfig({ root: fx.root }).mode, 'single');
+  assert.strictEqual(parseFilesConfig({}).mode, 'off');
+  ok('KABBY_FILES_ROOTS 解析：合法 / 重複 / 非法名稱 / 不存在 / 非目錄 / 相對路徑 / 兩者都設警告');
+
+  const srv = await startMini({ roots: `repo=${repo};models=${models}` });
+  const srvBad = await startMini({ roots: `repo=${repo};repo=${models}` });
+  const url = (s, p) => `http://127.0.0.1:${s.address().port}/api/files${p}`;
+  const get = (p, headers = {}) => fetch(url(srv, p), { headers });
+  const q = encodeURIComponent;
+  try {
+    // 根清單
+    for (const p of ['/list', '/list?path=', '/list?recursive=1']) {
+      const body = await (await get(p)).json();
+      assert.strictEqual(body.root, null);
+      assert.strictEqual(body.path, '');
+      assert.deepStrictEqual(body.entries.map((e) => [e.path, e.isDir]), [['repo', true], ['models', true]]);
+      assert.ok(!JSON.stringify(body).includes(fx.base), '根清單不可回絕對路徑');
+    }
+    ok('根清單：只列名稱（recursive 也不遞迴）、不回絕對路徑');
+
+    let body = await (await get('/list?path=repo&recursive=1')).json();
+    assert.strictEqual(body.root, 'repo');
+    assert.strictEqual(body.path, 'repo');
+    assert.deepStrictEqual(body.entries.map((e) => e.path).sort(), ['repo/executor', 'repo/executor/pull.py']);
+    body = await (await get(`/list?path=${q('models/hf')}&recursive=1`)).json();
+    assert.strictEqual(body.root, 'models');
+    assert.deepStrictEqual(body.entries.map((e) => e.path).sort(),
+      ['models/hf/vae', 'models/hf/vae/x.safetensors']);
+    ok('兩個根各自 list：path 帶名稱前綴、root 回名稱、不列 .git 與 junction');
+
+    body = await (await get(`/stat?path=${q('models\\hf\\vae\\x.safetensors')}&hash=1`)).json();
+    assert.strictEqual(body.path, 'models/hf/vae/x.safetensors');
+    assert.strictEqual(body.size, weights.length);
+    assert.strictEqual(body.sha256, crypto.createHash('sha256').update(weights).digest('hex'));
+    body = await (await get('/stat?path=repo/executor/pull.py')).json();
+    assert.strictEqual(body.path, 'repo/executor/pull.py');
+    assert.strictEqual((await get('/stat?path=repo')).status, 400);
+    assert.strictEqual((await get('/stat')).status, 400);
+    ok('stat：兩個根各自正確、sha256 正確、對根目錄 / 空路徑 → 400');
+
+    let r = await get('/raw?path=models/hf/vae/x.safetensors', { Range: 'bytes=0-99' });
+    assert.strictEqual(r.status, 206);
+    assert.ok(Buffer.from(await r.arrayBuffer()).equals(weights.subarray(0, 100)));
+    r = await get('/raw?path=repo/executor/pull.py');
+    assert.strictEqual(r.status, 200);
+    assert.strictEqual(await r.text(), 'print("pull")\n');
+    ok('raw：兩個根各自下載、Range 206');
+
+    for (const p of ['nope/x.bin', 'nope', 'Repo/executor/pull.py']) {
+      r = await get(`/raw?path=${q(p)}`);
+      assert.strictEqual(r.status, 404, p);
+      assert.deepStrictEqual(await r.json(), { error: 'unknown root' });
+    }
+    assert.strictEqual((await get('/list?path=nope')).status, 404);
+    ok('未知名稱 → 404 unknown root');
+
+    assert.strictEqual((await get(`/raw?path=${q('repo/../models/hf/vae/x.safetensors')}`)).status, 400);
+    if (hasLink) {
+      assert.strictEqual((await get(`/raw?path=${q('repo/models-link/hf/vae/x.safetensors')}`)).status, 400);
+      assert.strictEqual((await get(`/list?path=${q('repo/models-link')}`)).status, 400);
+    }
+    assert.strictEqual((await get('/raw?path=repo/.git/config')).status, 404);
+    assert.strictEqual((await get('/raw?path=.git/config')).status, 404);
+    ok('從 repo 用 .. 或 junction 跳到 models → 400；點開頭 → 404');
+
+    assert.strictEqual((await fetch(url(srvBad, '/list'))).status, 404);
+    ok('ROOTS 不合規 → /api/files 停用（404）');
+  } finally {
+    srv.close(); srvBad.close();
+  }
 }
 
 main().catch((err) => {
