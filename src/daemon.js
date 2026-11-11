@@ -17,6 +17,7 @@ const codexHistory = require('./codex-history');
 const { createWatcher } = require('./usage-watcher');
 const providers = require('./providers');
 const { createFilesRouter, parseFilesConfig } = require('./files');
+const { createFilesAudit } = require('./files-audit');
 
 // 監控 provider 路由：?provider=codex → codex 採集器，其餘（含未帶）→ claude。
 function collectorFor(provider) {
@@ -44,6 +45,14 @@ const FILES_CONFIG = parseFilesConfig({
   roots: process.env.KABBY_FILES_ROOTS,
 });
 const FILES_ALLOW_IPS = process.env.KABBY_FILES_ALLOW_IPS || '';
+// /api/files 稽核日誌（JSONL 每日一檔）：預設放 kabby 資料目錄 ~/.kabby/logs/files
+const FILES_LOG_DIR = process.env.KABBY_FILES_LOG_DIR
+  || path.join(require('os').homedir(), '.kabby', 'logs', 'files');
+const FILES_LOG_DAYS = parseInt(process.env.KABBY_FILES_LOG_DAYS || '30', 10) || 30;
+const filesAudit = FILES_CONFIG.mode === 'off'
+  ? null
+  : createFilesAudit({ logDir: FILES_LOG_DIR, logDays: FILES_LOG_DAYS });
+const filesRouter = createFilesRouter({ config: FILES_CONFIG, allowIps: FILES_ALLOW_IPS, audit: filesAudit });
 
 // token 取自：X-Kabby-Token header / Authorization: Bearer <token> / ?token= query
 // AUTH_TOKEN 未設則不鎖（本機開發）
@@ -356,11 +365,13 @@ app.get('/api/rooms/guest/conversation', async (req, res) => {
 // 其餘 /api/* 一律要 token（health / rooms/join / rooms/guest/* 已在上面先處理，不受影響）
 app.use('/api', (req, res, next) => {
   if (tokenOk(req)) return next();
+  // /api/files 認證失敗也要進稽核日誌（只記 bad_token，不記 token 值）
+  if (req.path === '/files' || req.path.startsWith('/files/')) filesRouter.recordBadToken(req);
   res.status(401).json({ error: 'unauthorized' });
 });
 
 // 唯讀檔案下載（token 之後；另有代理 header 拒絕 + IP 白名單 + 路徑檢查，見 src/files.js）
-app.use('/api/files', createFilesRouter({ config: FILES_CONFIG, allowIps: FILES_ALLOW_IPS }));
+app.use('/api/files', filesRouter);
 
 app.get('/api/providers', (req, res) => {
   res.json(providers.listProviders());
@@ -950,6 +961,7 @@ httpServer.listen(PORT, HOST, () => {
   console.log(`kabby daemon listening on http://${HOST}:${PORT}`);
   console.log(AUTH_TOKEN ? '[auth] AUTH_TOKEN enabled — /api + WS 需要 token' : '[auth] AUTH_TOKEN 未設 — 不鎖（僅適合本機）');
   logFilesConfig();
+  if (filesAudit) filesAudit.start().catch((err) => console.error('[files] 稽核啟動失敗：', err.message));
   // 背景採集：監看 cc / codex JSONL，檔案一變就增量入庫（B 方案常駐採集）
   ccWatcher.start();
   codexWatcher.start();
@@ -965,8 +977,10 @@ function logFilesConfig() {
   } else if (FILES_CONFIG.mode === 'multi') {
     const list = FILES_CONFIG.roots.map((r) => `${r.name}:${r.abs}`).join(', ');
     console.log(`[files] /api/files 啟用 roots=${list} allow=${allow}`);
+    console.log(`[files] 稽核日誌 ${FILES_LOG_DIR}（保留 ${FILES_LOG_DAYS} 天）`);
   } else if (FILES_CONFIG.mode === 'single') {
     console.log(`[files] /api/files 啟用 root=${FILES_CONFIG.roots[0].abs} allow=${allow}`);
+    console.log(`[files] 稽核日誌 ${FILES_LOG_DIR}（保留 ${FILES_LOG_DAYS} 天）`);
   } else {
     console.log('[files] KABBY_FILES_ROOT(S) 未設 — /api/files 關閉');
   }

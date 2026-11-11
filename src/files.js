@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
+const { createFilesAudit } = require('./files-audit');
 
 const IS_WINDOWS = process.platform === 'win32';
 const LIST_LIMIT = 100000;
@@ -25,11 +26,25 @@ const HASH_CHUNK = 1024 * 1024;
 // 經 tunnel / 反向代理轉入的特徵 header；出現就拒絕
 const PROXY_HEADERS = ['cf-connecting-ip', 'x-forwarded-for'];
 
-/** 錯誤帶 HTTP status，handler 統一轉成 JSON 回應（訊息固定，不洩漏實際路徑） */
+// 錯誤訊息 → 稽核日誌的 reason 代碼
+const REASON_BY_MESSAGE = {
+  'invalid path': 'invalid_path',
+  'path required': 'invalid_path',
+  'not found': 'not_found',
+  'unknown root': 'unknown_root',
+  'not a file': 'not_a_file',
+  'not a directory': 'not_a_directory',
+  'files root unavailable': 'root_unavailable',
+};
+// 這些 reason 算「被拒」（稽核重點，result=denied）；其餘錯誤 result=error
+const DENIED_REASONS = new Set(['bad_token', 'proxy_header', 'ip_not_allowed', 'invalid_path', 'dotfile']);
+
+/** 錯誤帶 HTTP status 與稽核 reason，handler 統一轉成 JSON 回應（訊息固定，不洩漏實際路徑） */
 class FilesError extends Error {
-  constructor(status, message) {
+  constructor(status, message, reason) {
     super(message);
     this.status = status;
+    this.reason = reason || REASON_BY_MESSAGE[message] || 'error';
   }
 }
 
@@ -79,7 +94,7 @@ function splitUserPath(raw, { required }) {
   }
   const segs = raw.split(/[\\/]+/).filter((s) => s !== '' && s !== '.');
   if (segs.some((s) => s === '..')) throw new FilesError(400, 'invalid path');
-  if (segs.some((s) => s.startsWith('.'))) throw new FilesError(404, 'not found');
+  if (segs.some((s) => s.startsWith('.'))) throw new FilesError(404, 'not found', 'dotfile');
   return segs;
 }
 
@@ -140,17 +155,23 @@ function parseFilesConfig({ root, roots } = {}) {
  * @param {string|null} [opts.roots]    多根目錄（KABBY_FILES_ROOTS，`名稱=路徑;…`），有設以它為準
  * @param {object} [opts.config]        已解析好的 parseFilesConfig() 結果（給了就不再解析 root / roots）
  * @param {string} [opts.allowIps]      逗號分隔 IP 白名單（空 = 不限）
- * @param {(line:string)=>void} [opts.log]  存取日誌輸出（預設 stderr）
- * 設定為 off（未設或不合規）時全部回 404。
+ * @param {(line:string)=>void} [opts.log]  stderr 存取日誌輸出（預設 stderr）
+ * @param {object} [opts.audit]         createFilesAudit() 實例（JSONL 稽核 + 即時狀態）；省略 = 只記記憶體
+ * 設定為 off（未設或不合規）時全部回 404（/activity 回 { enabled:false }）。
+ * 回傳的 router 帶 recordBadToken(req)：給 daemon 的 token middleware 在 /api/files 認證失敗時記稽核。
  */
-function createFilesRouter({ root, roots, config, allowIps = '', log = (line) => console.error(line) } = {}) {
+function createFilesRouter({ root, roots, config, allowIps = '', log = (line) => console.error(line), audit } = {}) {
   const router = express.Router();
   const cfg = config || parseFilesConfig({ root, roots });
 
   if (cfg.mode === 'off') {
+    router.recordBadToken = () => {};
+    router.get('/activity', (req, res) => res.json({ enabled: false }));
     router.use((req, res) => res.status(404).json({ error: 'files service disabled' }));
     return router;
   }
+
+  const auditor = audit || createFilesAudit({ logDir: null });
 
   const multi = cfg.mode === 'multi';
   const rootByName = new Map(cfg.roots.map((r) => [r.name, r]));
@@ -198,7 +219,7 @@ function createFilesRouter({ root, roots, config, allowIps = '', log = (line) =>
     }
     if (!isInside(rootReal, real)) throw new FilesError(400, 'invalid path');
     const relInRoot = toRel(rootReal, real);
-    if (relInRoot.split('/').some((s) => s.startsWith('.'))) throw new FilesError(404, 'not found');
+    if (relInRoot.split('/').some((s) => s.startsWith('.'))) throw new FilesError(404, 'not found', 'dotfile');
     const st = await fs.promises.stat(real);
     return { rootDef, rootReal, real, relInRoot, rel: publicPath(rootDef, relInRoot), st };
   }
@@ -215,49 +236,117 @@ function createFilesRouter({ root, roots, config, allowIps = '', log = (line) =>
     return { root: null, path: '', entries };
   }
 
-  /** 串流計算 sha256；同一檔（key 相同）正在算時共用同一個 Promise */
-  function computeSha256(real, key) {
+  /** 串流計算 sha256；同一檔（key 相同）正在算時共用同一個 Promise。進度回報給 auditor */
+  function computeSha256(real, key, info) {
     if (hashInflight.has(key)) return hashInflight.get(key);
+    const tracker = auditor.startHash(info);
     const promise = new Promise((resolve, reject) => {
       const hash = crypto.createHash('sha256');
       const stream = fs.createReadStream(real, { highWaterMark: HASH_CHUNK });
-      stream.on('data', (chunk) => hash.update(chunk));
+      stream.on('data', (chunk) => { hash.update(chunk); tracker.progress(chunk.length); });
       stream.on('error', reject);
       stream.on('end', () => resolve(hash.digest('hex')));
     }).then((hex) => {
       hashCache.set(key, hex);
       return hex;
     }).finally(() => {
+      tracker.end();
       hashInflight.delete(key);
     });
     hashInflight.set(key, promise);
     return promise;
   }
 
-  /** 一行存取日誌 */
-  function accessLog(req, fields) {
-    const parts = [`[files] ${new Date().toISOString()}`, `ip=${normalizeIp(req.socket.remoteAddress)}`];
-    for (const [k, v] of Object.entries(fields)) {
+  /** stderr 一行存取日誌（只記 raw / hash，格式沿用 daemon 的 [tag]） */
+  function stderrLine(ev) {
+    const parts = [`[files] ${new Date().toISOString()}`, `ip=${ev.ip}`, ev.endpoint];
+    for (const k of ['path', 'range', 'status', 'bytes', 'ms']) {
+      const v = ev[k];
       if (v === undefined || v === null || v === '') continue;
-      parts.push(k === 'op' || k === 'result' ? String(v) : `${k}=${v}`);
+      parts.push(`${k}=${v}`);
     }
+    parts.push(ev.result);
     log(parts.join(' '));
   }
 
-  /** 把 FilesError / 其他錯誤轉成 JSON 回應 */
+  /** 把 FilesError / 其他錯誤轉成 JSON 回應，並把 reason 記到稽核 context */
   function sendError(res, err) {
     const status = err instanceof FilesError ? err.status : 500;
     const message = err instanceof FilesError ? err.message : 'internal error';
+    const ctx = res.locals.files;
+    if (ctx && !ctx.reason) ctx.reason = err instanceof FilesError ? err.reason : 'internal';
     if (!res.headersSent) res.status(status).json({ error: message });
     return status;
   }
 
+  /** 請求屬於哪個端點（稽核欄位 endpoint） */
+  function endpointOf(req, reqPath) {
+    const name = String(reqPath || '').replace(/^\/+/, '').split('/')[0];
+    if (name === 'stat' && (req.query.hash === '1' || req.query.hash === 'true')) return 'hash';
+    return ['list', 'stat', 'raw', 'activity'].includes(name) ? name : 'other';
+  }
+
+  /** 使用者傳的 path（稽核用，截長） */
+  function rawPathOf(req) {
+    return typeof req.query.path === 'string' ? req.query.path.slice(0, 512) : '';
+  }
+
+  /** daemon token middleware 在 /api/files/* 認證失敗時呼叫：只記 reason，絕不記 token 值 */
+  router.recordBadToken = (req) => {
+    const reqPath = String(req.path || '').replace(/^\/files/, '');
+    auditor.record({
+      ip: normalizeIp(req.socket.remoteAddress), method: req.method, endpoint: endpointOf(req, reqPath),
+      path: rawPathOf(req), status: 401, ms: 0, result: 'denied', reason: 'bad_token',
+    });
+  };
+
+  // 即時狀態：只需 token（daemon 已驗），不套代理 header / IP 白名單；輪詢請求不寫稽核日誌
+  router.get('/activity', (req, res) => {
+    res.json({
+      enabled: true,
+      ...auditor.snapshot(),
+      config: {
+        mode: cfg.mode,
+        roots: cfg.roots.map((r) => r.name),
+        allowIps: [...allowSet],
+      },
+    });
+  });
+
+  // 稽核 context：每個請求結束（含中途斷線）記一筆；raw / hash 另寫 stderr
+  router.use((req, res, next) => {
+    const ctx = {
+      endpoint: endpointOf(req, req.path), path: rawPathOf(req), range: req.headers.range,
+      bytes: 0, size: null, result: null, reason: null, started: Date.now(),
+    };
+    res.locals.files = ctx;
+    res.once('close', () => {
+      const status = res.statusCode;
+      let result = ctx.result;
+      if (!result) {
+        if (status >= 400) result = DENIED_REASONS.has(ctx.reason) ? 'denied' : 'error';
+        else result = res.writableFinished ? 'ok' : 'aborted';
+      }
+      if (status >= 400 && !ctx.reason) ctx.reason = status === 404 ? 'not_found' : status === 416 ? 'range_not_satisfiable' : 'error';
+      const ev = {
+        ip: normalizeIp(req.socket.remoteAddress), method: req.method, endpoint: ctx.endpoint,
+        path: ctx.path, range: ctx.range, status, bytes: ctx.endpoint === 'raw' ? ctx.bytes : undefined,
+        size: ctx.size, ms: Date.now() - ctx.started, result, reason: status >= 400 ? ctx.reason : undefined,
+      };
+      auditor.record(ev);
+      if (ctx.endpoint === 'raw' || ctx.endpoint === 'hash') stderrLine(ev);
+    });
+    next();
+  });
+
   // 關卡 1、2：代理 header、IP 白名單
   router.use((req, res, next) => {
     if (PROXY_HEADERS.some((h) => req.headers[h] !== undefined)) {
+      res.locals.files.reason = 'proxy_header';
       return res.status(403).json({ error: 'forbidden' });
     }
     if (allowSet.size && !allowSet.has(normalizeIp(req.socket.remoteAddress))) {
+      res.locals.files.reason = 'ip_not_allowed';
       return res.status(403).json({ error: 'forbidden' });
     }
     next();
@@ -316,63 +405,62 @@ function createFilesRouter({ root, roots, config, allowIps = '', log = (line) =>
   // GET /stat?path=<檔案>&hash=1
   router.get('/stat', async (req, res) => {
     const wantHash = req.query.hash === '1' || req.query.hash === 'true';
-    const started = Date.now();
-    let relForLog = typeof req.query.path === 'string' ? req.query.path : '';
+    const ctx = res.locals.files;
     try {
       const { real, rel, st } = await resolveUserPath(req.query.path, { required: true });
-      relForLog = rel;
+      ctx.path = rel;
       if (!st.isFile()) throw new FilesError(400, 'not a file');
+      ctx.size = st.size;
       const key = `${real}|${st.size}|${st.mtimeMs}`;
       let sha256 = hashCache.get(key) || null;
-      let cached = !!sha256;
-      if (!sha256 && wantHash) sha256 = await computeSha256(real, key);
-      if (wantHash) {
-        accessLog(req, { op: 'hash', path: rel, status: 200, ms: Date.now() - started, result: cached ? 'cached' : 'ok' });
-      }
+      if (sha256 && wantHash) ctx.result = 'cached';
+      if (!sha256 && wantHash) sha256 = await computeSha256(real, key, { path: rel, size: st.size });
       res.json({ path: rel, size: st.size, mtime: st.mtime.toISOString(), sha256 });
     } catch (err) {
-      const status = sendError(res, err);
-      if (wantHash) accessLog(req, { op: 'hash', path: relForLog, status, ms: Date.now() - started, result: 'error' });
+      sendError(res, err);
     }
   });
 
   // GET /raw?path=<檔案>：交給 send 處理 Range / ETag / Last-Modified；斷線時 send 會關掉 read stream
   router.get('/raw', async (req, res) => {
-    const started = Date.now();
-    let relForLog = typeof req.query.path === 'string' ? req.query.path : '';
-    let bytes = 0;
-    let errored = false;
-    // 計算實際傳出的 body bytes
+    const ctx = res.locals.files;
+    let tracker = null;
+    // 計算實際傳出的 body bytes，同步回報給即時狀態
     const origWrite = res.write;
     res.write = function countingWrite(chunk, ...rest) {
-      if (chunk) bytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+      if (chunk) {
+        const n = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+        ctx.bytes += n;
+        if (tracker) tracker.add(n);
+      }
       return origWrite.call(this, chunk, ...rest);
     };
-    res.once('close', () => {
-      const result = errored ? 'error' : (res.writableFinished ? 'ok' : 'aborted');
-      accessLog(req, {
-        op: 'raw', path: relForLog, range: req.headers.range, status: res.statusCode,
-        bytes, ms: Date.now() - started, result,
-      });
-    });
+    res.once('close', () => { if (tracker) tracker.end(); });
     try {
       const { rootReal, relInRoot, rel, st } = await resolveUserPath(req.query.path, { required: true });
-      relForLog = rel;
+      ctx.path = rel;
       if (!st.isFile()) throw new FilesError(400, 'not a file');
+      ctx.size = st.size;
+      // 預估這次要傳的 bytes（Range 合法時為區段長度，否則整檔）
+      const ranges = req.headers.range ? req.range(st.size) : null;
+      const total = Array.isArray(ranges) ? ranges.reduce((sum, r) => sum + (r.end - r.start + 1), 0) : st.size;
+      if (!res.destroyed) {
+        tracker = auditor.startDownload({ ip: normalizeIp(req.socket.remoteAddress), path: rel, range: req.headers.range, total });
+      }
       // 傳相對路徑 + root：dotfiles 檢查只看 root 以下的部分（root 本身路徑含點目錄也不受影響）
       res.sendFile(relInRoot, { root: rootReal, dotfiles: 'deny', acceptRanges: true, lastModified: true, etag: true }, (err) => {
         if (!err) return;
         if (err.code === 'ECONNABORTED' || err.code === 'ECONNRESET' || res.destroyed) return;   // 用戶端斷線
-        errored = true;
         if (!res.headersSent) {
           const status = err.status || err.statusCode || 500;
+          ctx.reason = status === 404 ? 'not_found' : status === 416 ? 'range_not_satisfiable' : 'internal';
           res.status(status).json({ error: status === 404 ? 'not found' : status === 416 ? 'range not satisfiable' : 'internal error' });
         } else {
+          ctx.result = 'error';
           res.destroy();
         }
       });
     } catch (err) {
-      errored = true;
       sendError(res, err);
     }
   });

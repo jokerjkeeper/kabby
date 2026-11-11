@@ -416,16 +416,74 @@ curl -H "X-Kabby-Token: $AUTH_TOKEN" -r 0-99 "http://127.0.0.1:3700/api/files/ra
 curl -H "X-Kabby-Token: $AUTH_TOKEN" -C - "http://10.1.129.104:3700/api/files/raw?path=sdxl/model.safetensors" -o model.safetensors
 ```
 
-### 存取日誌
+### 稽核日誌（JSONL）
 
-每個 `raw` 與 `hash=1` 請求在 daemon 的 stderr 寫一行：
+`/api/files` 的每個請求（含被拒的 401 / 403 / 400）寫一行 JSON 到 `<KABBY_FILES_LOG_DIR>/files-YYYY-MM-DD.jsonl`（本地日期，每日一檔）。`/activity` 輪詢不寫。
+
+| 變數 | 預設 | 說明 |
+|---|---|---|
+| `KABBY_FILES_LOG_DIR` | `~/.kabby/logs/files` | 日誌目錄（kabby 資料目錄，不在 repo 內） |
+| `KABBY_FILES_LOG_DAYS` | `30` | 保留天數；啟動時與每 24 小時清掉更舊的 `files-*.jsonl` |
+
+```json
+{"ts":"2026-11-11T13:19:49.183Z","ip":"10.1.129.112","method":"GET","endpoint":"raw","path":"models/w.bin","range":"bytes=0-99","status":206,"bytes":100,"size":3000000,"ms":13,"result":"ok"}
+{"ts":"2026-11-11T13:19:49.228Z","ip":"10.1.129.50","method":"GET","endpoint":"list","status":401,"ms":0,"result":"denied","reason":"bad_token"}
+{"ts":"2026-11-11T13:19:49.272Z","ip":"10.1.129.112","method":"GET","endpoint":"raw","path":"repo/../models/w.bin","status":400,"bytes":0,"ms":1,"result":"denied","reason":"invalid_path"}
+```
+
+| 欄位 | 說明 |
+|---|---|
+| `ts` | ISO 時間（UTC） |
+| `ip` | 來源 IP（socket 位址，已去 `::ffff:`） |
+| `method` / `endpoint` | `GET` / `list`、`stat`、`hash`（`stat?hash=1`）、`raw`、`other` |
+| `path` | 解析成功時為正規化路徑；被拒時為收到的原始字串（截 512 字） |
+| `range` | 請求的 `Range` header |
+| `status` / `ms` | HTTP 狀態、耗時 |
+| `bytes` | raw 實際傳出的 body bytes（中途斷線時為已送出量） |
+| `size` | 檔案大小（stat / hash / raw） |
+| `result` | `ok` / `aborted`（用戶端中途斷線）/ `error` / `cached`（hash 走快取）/ `denied` |
+| `reason` | 失敗原因：被拒（`result=denied`）為 `bad_token` / `proxy_header` / `ip_not_allowed` / `invalid_path` / `dotfile`；其他錯誤為 `not_found` / `unknown_root` / `not_a_file` / `not_a_directory` / `range_not_satisfiable` / `root_unavailable` |
+
+- **絕不記錄 token**：認證失敗只記 `reason:"bad_token"`。事件欄位是白名單，不含任何 header 與 query（`?token=` 不會被寫入）。
+- **被拒限流**：每個 IP 每分鐘最多寫 60 筆被拒事件，超過的只計數，之後補一筆 `{"result":"denied","reason":"suppressed","suppressed":N}`。`activity` 的統計照常完整計數。目的是防止內網有東西一直亂打，把磁碟寫爆。
+- **寫檔失敗**（目錄不可寫、磁碟滿）只在 stderr 警告（每分鐘最多一次），不影響下載。
+
+stderr 另外保留一行簡要日誌（只記 `raw` 與 `hash`）：
 
 ```
-[files] 2026-11-11T03:20:11.002Z ip=10.1.129.112 raw path=sdxl/model.safetensors range=bytes=0-99 status=206 bytes=100 ms=3 ok
-[files] 2026-11-11T03:25:40.517Z ip=10.1.129.112 hash path=sdxl/model.safetensors status=200 ms=61234 ok
+[files] 2026-11-11T03:20:11.002Z ip=10.1.129.112 raw path=models/w.bin range=bytes=0-99 status=206 bytes=100 ms=3 ok
 ```
 
-結果欄：`ok` / `aborted`（用戶端中途斷線）/ `error`；hash 走快取時為 `cached`。
+### `GET /api/files/activity`
+
+即時狀態，給 kabby 主頁的「📦 檔案傳輸」監控頁（`/files.html`，每 2 秒輪詢）使用。**只需 token**，不套 `KABBY_FILES_ALLOW_IPS` 與代理 header 檢查（跟 kabby 其他 API 同一個標準）。輪詢不寫稽核日誌。`/api/files` 未啟用時回 `{ "enabled": false }`。
+
+```json
+{
+  "enabled": true,
+  "active": [
+    { "id": 7, "ip": "10.1.129.112", "path": "models/hf/vae/x.safetensors", "range": "bytes=1048576-",
+      "sent": 524288000, "total": 6937029758, "startedAt": "2026-11-11T13:20:01.000Z", "mibps": 104.2 }
+  ],
+  "hashing": [
+    { "path": "models/hf/unet.safetensors", "size": 32000000000, "done": 8000000000, "startedAt": "2026-11-11T13:19:00.000Z" }
+  ],
+  "recent": [ { "ts": "…", "ip": "…", "endpoint": "raw", "status": 206, "result": "ok", "…": "同 JSONL 欄位，最新在前，最多 200 筆" } ],
+  "stats": {
+    "since": "2026-11-11T13:00:00.000Z", "requests": 42, "bytesSent": 21474836480,
+    "bytesByIp": { "10.1.129.112": 21474836480 },
+    "byStatus": { "200": 30, "206": 8, "401": 2, "400": 2 },
+    "denied": 4, "deniedByReason": { "bad_token": 2, "invalid_path": 2 }
+  },
+  "log": { "enabled": true, "writable": true, "days": 30 },
+  "config": { "mode": "multi", "roots": ["repo", "models"], "allowIps": ["10.1.129.112"] }
+}
+```
+
+- `active[].mibps`：這次下載開始以來的平均速度。`total` 是這次要傳的量：有 Range 時為區段長度，沒有時為整個檔案。
+- `hashing[].done`：已讀取的 bytes，用來算進度。
+- `stats`：自 daemon 啟動以來的累計，重啟歸零。
+- 不回傳任何絕對路徑（日誌目錄也只回是否可寫）。
 
 ---
 
