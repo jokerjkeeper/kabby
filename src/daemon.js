@@ -16,6 +16,7 @@ const codexCollector = require('./codex-collector');
 const codexHistory = require('./codex-history');
 const { createWatcher } = require('./usage-watcher');
 const providers = require('./providers');
+const { createFilesRouter } = require('./files');
 
 // 監控 provider 路由：?provider=codex → codex 採集器，其餘（含未帶）→ claude。
 function collectorFor(provider) {
@@ -37,6 +38,9 @@ const ALLOWED_ORIGINS = (process.env.KABBY_ALLOWED_ORIGINS || '')
 // 語音輸入（🎙 按住說話）的 STT 服務（Voicebox / Whisper）；daemon 代理轉發，瀏覽器不直連
 const STT_URL = (process.env.KABBY_STT_URL || 'http://127.0.0.1:17493').replace(/\/+$/, '');
 const STT_TIMEOUT_MS = parseInt(process.env.KABBY_STT_TIMEOUT_MS || '60000', 10) || 60000;
+// 唯讀檔案下載服務（/api/files）：未設 KABBY_FILES_ROOT = 關閉
+const FILES_ROOT = process.env.KABBY_FILES_ROOT || null;
+const FILES_ALLOW_IPS = process.env.KABBY_FILES_ALLOW_IPS || '';
 
 // token 取自：X-Kabby-Token header / Authorization: Bearer <token> / ?token= query
 // AUTH_TOKEN 未設則不鎖（本機開發）
@@ -351,6 +355,9 @@ app.use('/api', (req, res, next) => {
   if (tokenOk(req)) return next();
   res.status(401).json({ error: 'unauthorized' });
 });
+
+// 唯讀檔案下載（token 之後；另有代理 header 拒絕 + IP 白名單 + 路徑檢查，見 src/files.js）
+app.use('/api/files', createFilesRouter({ root: FILES_ROOT, allowIps: FILES_ALLOW_IPS }));
 
 app.get('/api/providers', (req, res) => {
   res.json(providers.listProviders());
@@ -939,6 +946,9 @@ function handleConnection(ws, session, guestCtx) {
 httpServer.listen(PORT, HOST, () => {
   console.log(`kabby daemon listening on http://${HOST}:${PORT}`);
   console.log(AUTH_TOKEN ? '[auth] AUTH_TOKEN enabled — /api + WS 需要 token' : '[auth] AUTH_TOKEN 未設 — 不鎖（僅適合本機）');
+  console.log(FILES_ROOT
+    ? `[files] /api/files 啟用 root=${FILES_ROOT} allow=${FILES_ALLOW_IPS || '(不限)'}`
+    : '[files] KABBY_FILES_ROOT 未設 — /api/files 關閉');
   // 背景採集：監看 cc / codex JSONL，檔案一變就增量入庫（B 方案常駐採集）
   ccWatcher.start();
   codexWatcher.start();

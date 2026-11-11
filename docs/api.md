@@ -320,6 +320,87 @@ curl -H "X-Kabby-Token: $AUTH_TOKEN" -F file=@hello.wav -F language=zh http://lo
 
 ---
 
+## 唯讀檔案下載（/api/files）
+
+讓內網其他機器從本機串流拉大型檔案（例：GPU 機從 kabby 主機拉幾十 GB 的模型檔），支援 Range 斷點續傳。**只讀**：不提供上傳、刪除、改名。
+
+### 設定（`.env`，全部選填）
+
+| 變數 | 說明 |
+|---|---|
+| `KABBY_FILES_ROOT` | 分享的根目錄（絕對路徑，例 `D:\models-share`）。**未設 = 功能關閉**，`/api/files/*` 一律 `404` |
+| `KABBY_FILES_ALLOW_IPS` | 來源 IP 白名單，逗號分隔（例 `10.1.129.112`）；空 = 不限。`::ffff:10.1.129.112` 這類 IPv4-mapped IPv6 會自動比對成 IPv4 |
+
+daemon 要讓別台機器連得到，需 `HOST=0.0.0.0` 並設 `AUTH_TOKEN`。
+
+### 安全規則（依序檢查）
+
+1. **token**：沿用 `AUTH_TOKEN`（掛在 token middleware 之後），失敗 `401`。**請用 `X-Kabby-Token` header**；`?token=` 雖然可用，但會出現在存取日誌與代理 log 裡，下載端不要用。
+2. **拒絕經 tunnel / 代理轉入的請求**：只要 header 帶 `cf-connecting-ip` 或 `x-forwarded-for`，一律 `403`，不管來源 IP 與 token。原因：cloudflared / 反向代理轉進來的連線，socket 位址是 `127.0.0.1`；這條確保即使白名單含 `127.0.0.1`，外部請求也進不來。
+3. **IP 白名單**：看 TCP socket 的來源位址（不信任任何 header），不在名單內 `403`。建議只填下載端機器，本機自測時再暫時加 `127.0.0.1`。
+4. **路徑檢查**：`path` 一律是相對於根目錄的路徑（`/` 或 `\` 分隔皆可，回應一律 `/`）。
+   - 絕對路徑、磁碟代號、UNC、含 `:`（Windows ADS）、空字元、任何 `..` 段 → `400 { "error": "invalid path" }`
+   - `realpath` 後不在根目錄底下（symlink / junction 逃逸）→ `400`
+   - 點開頭的檔案或目錄（`.gitattributes`、`.cache/` …）→ 視為不存在，`404`；`list` 也不列出
+   - 錯誤訊息不包含實際路徑
+
+### `GET /api/files/list?path=<相對目錄>&recursive=1`
+
+`path` 省略 = 根目錄。`recursive=1` 遞迴列出（最多 100,000 筆，超過時多回 `"truncated": true`）。不跟進 symlink / junction。`entries[].path` 是**相對根目錄**的路徑，可直接拿去打 `stat` / `raw`。
+
+```json
+{
+  "root": "models-share",
+  "path": "sdxl",
+  "entries": [
+    { "path": "sdxl/model.safetensors", "size": 6938078334, "mtime": "2026-11-11T03:12:45.123Z", "isDir": false },
+    { "path": "sdxl/vae", "size": 0, "mtime": "2026-11-11T03:10:01.000Z", "isDir": true }
+  ]
+}
+```
+
+`root` 只是根目錄名稱（不含絕對路徑）。`path` 指向檔案 → `400 { "error": "not a directory" }`。
+
+### `GET /api/files/stat?path=<檔案>&hash=1`
+
+```json
+{ "path": "sdxl/model.safetensors", "size": 6938078334, "mtime": "2026-11-11T03:12:45.123Z", "sha256": "9f2c…" }
+```
+
+- `sha256`：有快取直接回；沒快取且沒帶 `hash=1` 時為 `null`。
+- `hash=1`：串流計算（不整檔讀進記憶體；30GB 約需數分鐘，請把下載端的 HTTP timeout 拉長）。同一檔案正在算時，後到的請求等同一個計算結果，不會重算。用戶端中途斷線，計算仍會完成並寫入快取。
+- 快取在記憶體（daemon 重啟即清），key = 實際路徑 + size + mtime；檔案一變就失效。
+- `path` 指向目錄 → `400 { "error": "not a file" }`。
+
+### `GET /api/files/raw?path=<檔案>`
+
+串流下載原始內容（Content-Type 依副檔名推斷，未知時為 `application/octet-stream`）。
+
+- 回應 header：`Accept-Ranges: bytes`、`Content-Length`、`ETag`、`Last-Modified`
+- **Range 續傳**：`Range: bytes=<start>-[<end>]` → `206` + `Content-Range: bytes <start>-<end>/<size>`；超出檔案大小 → `416`
+- 支援 `If-Range`（搭配 ETag / Last-Modified，檔案變了就回完整 `200`）
+- 用戶端中途斷線會關閉讀檔 stream，不會留下 fd
+
+```bash
+# 取前 100 bytes（回 206、長度 100）
+curl -H "X-Kabby-Token: $AUTH_TOKEN" -r 0-99 "http://127.0.0.1:3700/api/files/raw?path=sdxl/model.safetensors" -o part.bin
+# 斷點續傳
+curl -H "X-Kabby-Token: $AUTH_TOKEN" -C - "http://10.1.129.104:3700/api/files/raw?path=sdxl/model.safetensors" -o model.safetensors
+```
+
+### 存取日誌
+
+每個 `raw` 與 `hash=1` 請求在 daemon 的 stderr 寫一行：
+
+```
+[files] 2026-11-11T03:20:11.002Z ip=10.1.129.112 raw path=sdxl/model.safetensors range=bytes=0-99 status=206 bytes=100 ms=3 ok
+[files] 2026-11-11T03:25:40.517Z ip=10.1.129.112 hash path=sdxl/model.safetensors status=200 ms=61234 ok
+```
+
+結果欄：`ok` / `aborted`（用戶端中途斷線）/ `error`；hash 走快取時為 `cached`。
+
+---
+
 ## WebSocket
 
 ### `ws://localhost:3700/ws/:id`（HTTPS 下用 `wss://`）

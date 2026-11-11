@@ -69,6 +69,8 @@ npm run dist        # 打包成 Windows portable exe
 | `KABBY_VIEWER_PATH` | （未設） | cc history viewer 的 portable exe 絕對路徑；設了 UI 上「viewer」按鈕才會啟用 |
 | `KABBY_STT_URL` | `http://127.0.0.1:17493` | 🎙 語音輸入用的 STT 服務（Voicebox / Whisper）位址，daemon 代理轉發 |
 | `KABBY_STT_TIMEOUT_MS` | `60000` | 單次語音轉寫的逾時（毫秒） |
+| `KABBY_FILES_ROOT` | （未設 = 關閉） | 唯讀檔案下載服務 `/api/files` 的分享根目錄（絕對路徑），見 [docs/api.md](docs/api.md#唯讀檔案下載apifiles) |
+| `KABBY_FILES_ALLOW_IPS` | （空 = 不限） | `/api/files` 的來源 IP 白名單，逗號分隔（例 `10.1.129.112`） |
 
 使用者資料放 `~/.kabby/`：`profiles.json`（項目清單）、`sensitive-words.json`（敏感詞庫）、用量索引。
 
