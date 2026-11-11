@@ -11,10 +11,12 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const net = require('net');
+const http = require('http');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const express = require('express');
 const { createFilesRouter, parseFilesConfig } = require('../src/files');
+const { createFilesAudit, localDate } = require('../src/files-audit');
 
 const TOKEN = 'test-files-token';
 const DAEMON = path.join(__dirname, '..', 'src', 'daemon.js');
@@ -57,7 +59,13 @@ function makeFixture() {
   } catch (err) {
     console.log(`  (略過 junction 逃逸測試：${err.code})`);
   }
-  return { base, root, home, big, hasLink };
+  // 稽核日誌目錄：預先放一個過期檔、一個今天的檔、一個無關檔，驗證啟動時只清過期的
+  const logDir = path.join(base, 'logs');
+  fs.mkdirSync(logDir, { recursive: true });
+  fs.writeFileSync(path.join(logDir, 'files-2000-01-01.jsonl'), '{}\n');
+  fs.writeFileSync(path.join(logDir, `files-${localDate(Date.now())}.jsonl`), '');
+  fs.writeFileSync(path.join(logDir, 'notes.txt'), 'keep');
+  return { base, root, home, big, hasLink, logDir };
 }
 
 /** 起 daemon 子行程，等到 listening */
@@ -70,6 +78,8 @@ function startDaemon(port, fx) {
       AUTH_TOKEN: TOKEN,
       KABBY_FILES_ROOT: fx.root,
       KABBY_FILES_ROOTS: '',   // 擋掉本機 .env 的多根設定，這段測單根模式
+      KABBY_FILES_LOG_DIR: fx.logDir,
+      KABBY_FILES_LOG_DAYS: '30',
       KABBY_FILES_ALLOW_IPS: '127.0.0.1,::1',
       HOME: fx.home,
       USERPROFILE: fx.home,
@@ -231,6 +241,8 @@ async function main() {
     assert.ok(/status=206 .*bytes=100 .*ok$/.test(rawLog), rawLog);
     assert.ok(logs.some((l) => l.includes('[files]') && l.includes(' hash ')), '應有 hash 存取日誌');
     ok('存取日誌寫 stderr（ip / path / range / status / bytes / ms / 結果）');
+
+    await testAuditWithDaemon({ fx, base, port, get, ok });
   } finally {
     child.kill();
   }
@@ -243,6 +255,12 @@ async function main() {
     const url = (srv, p) => `http://127.0.0.1:${srv.address().port}/api/files${p}`;
     assert.strictEqual((await fetch(url(srvDeny, '/list'))).status, 403);
     ok('IP 不在白名單 → 403');
+    const actDeny = await fetch(url(srvDeny, '/activity'));
+    assert.strictEqual(actDeny.status, 200);
+    assert.strictEqual((await actDeny.json()).enabled, true);
+    ok('activity 不套 IP 白名單');
+    assert.deepStrictEqual(await (await fetch(url(srvOff, '/activity'))).json(), { enabled: false });
+    ok('未啟用時 activity 回 { enabled:false }');
     assert.strictEqual((await fetch(url(srvMapped, '/list'))).status, 200);
     ok('白名單寫 ::ffff: 形式也能比對');
     assert.strictEqual((await fetch(url(srvOff, '/list'))).status, 404);
@@ -253,9 +271,148 @@ async function main() {
   }
 
   await testMultiRoots(fx, ok);
+  await testAuditUnit(fx, ok);
 
   fs.rmSync(fx.base, { recursive: true, force: true });
   console.log(`\nfiles: ${passed} 項全部通過`);
+}
+
+/** 讀今天的 JSONL 稽核檔 */
+function readAudit(logDir) {
+  const file = path.join(logDir, `files-${localDate(Date.now())}.jsonl`);
+  const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  return { text, events: text.split('\n').filter(Boolean).map((l) => JSON.parse(l)) };
+}
+
+/** 輪詢直到 fn() 回 truthy（最多 ms 毫秒） */
+async function waitFor(fn, ms = 3000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const v = await fn();
+    if (v) return v;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return fn();
+}
+
+/** 稽核 JSONL + activity（在真的 daemon 上跑） */
+async function testAuditWithDaemon({ fx, base, port, get, ok }) {
+  // 啟動時清過期檔
+  assert.ok(!fs.existsSync(path.join(fx.logDir, 'files-2000-01-01.jsonl')), '過期日誌應被清除');
+  assert.ok(fs.existsSync(path.join(fx.logDir, 'notes.txt')), '非日誌檔不可刪');
+  ok('啟動時清掉超過保留天數的日誌，其他檔不動');
+
+  // 錯誤 token：要記 bad_token，但不可出現 token 值
+  assert.strictEqual((await (await get('/stat?path=model.bin&hash=1')).json()).sha256.length, 64);   // 走快取
+  const WRONG = 'WRONG-SECRET-xyz789';
+  assert.strictEqual((await fetch(`${base}/raw?path=model.bin`, { headers: { 'X-Kabby-Token': WRONG } })).status, 401);
+  assert.strictEqual((await fetch(`${base}/list?token=${WRONG}`)).status, 401);
+  const { text, events } = await waitFor(() => {
+    const a = readAudit(fx.logDir);
+    return a.events.filter((e) => e.reason === 'bad_token').length >= 2 && a;
+  });
+  assert.ok(!text.includes(WRONG), '稽核日誌不可含收到的 token');
+  assert.ok(!text.includes(TOKEN), '稽核日誌不可含正確 token');
+  const bad = events.find((e) => e.reason === 'bad_token' && e.endpoint === 'raw');
+  assert.ok(bad, '應記 raw 的 bad_token');
+  assert.deepStrictEqual([bad.status, bad.result, bad.path, bad.method], [401, 'denied', 'model.bin', 'GET']);
+  ok('401 記 bad_token（result=denied），日誌不含任何 token 值');
+
+  // 其他被拒原因與正常事件的欄位
+  const reasons = new Set(events.map((e) => e.reason));
+  for (const r of ['proxy_header', 'invalid_path', 'dotfile', 'not_found']) assert.ok(reasons.has(r), `應有 reason=${r}`);
+  assert.ok(events.filter((e) => e.reason === 'invalid_path').every((e) => e.result === 'denied' && e.status === 400));
+  const raw = events.find((e) => e.endpoint === 'raw' && e.range === 'bytes=0-99');
+  for (const k of ['ts', 'ip', 'method', 'endpoint', 'path', 'range', 'status', 'bytes', 'size', 'ms', 'result']) {
+    assert.ok(raw[k] !== undefined, `raw 事件缺欄位 ${k}`);
+  }
+  assert.deepStrictEqual([raw.ip, raw.path, raw.status, raw.bytes, raw.size, raw.result],
+    ['127.0.0.1', 'model.bin', 206, 100, fx.big.length, 'ok']);
+  assert.ok(events.some((e) => e.endpoint === 'hash' && e.result === 'ok' && e.size === fx.big.length));
+  assert.ok(events.some((e) => e.endpoint === 'hash' && e.result === 'cached'));
+  assert.ok(events.some((e) => e.endpoint === 'list' && e.result === 'ok'));
+  assert.ok(!events.some((e) => e.endpoint === 'activity'), 'activity 輪詢不寫稽核');
+  ok('JSONL 欄位正確：raw / hash(ok, cached) / list，被拒請求帶 reason');
+
+  // activity：下載進行中看得到 active，斷線後移除並記 aborted
+  const bigPath = path.join(fx.root, 'big.bin');
+  fs.writeFileSync(bigPath, Buffer.alloc(48 * 1024 * 1024, 7));
+  let firstChunk = false;
+  const req = http.get(`${base}/raw?path=big.bin`, { headers: { 'X-Kabby-Token': TOKEN } }, (res) => {
+    res.once('data', () => { firstChunk = true; res.pause(); });
+  });
+  req.on('error', () => {});
+  await waitFor(() => firstChunk);
+  const act = await waitFor(async () => {
+    const a = await (await get('/activity')).json();
+    return a.active.some((d) => d.path === 'big.bin' && d.sent > 0) && a;
+  });
+  const dl = act.active.find((d) => d.path === 'big.bin');
+  assert.ok(dl, 'active 應有進行中的下載');
+  assert.deepStrictEqual([dl.ip, dl.total, typeof dl.mibps, typeof dl.id], ['127.0.0.1', 48 * 1024 * 1024, 'number', 'number']);
+  assert.ok(dl.sent < dl.total);
+  assert.strictEqual(act.enabled, true);
+  assert.deepStrictEqual(act.config.roots, ['share']);
+  assert.ok(act.stats.denied >= 2 && act.stats.deniedByReason.bad_token >= 2);
+  assert.ok(act.stats.bytesSent > 0 && act.stats.bytesByIp['127.0.0.1'] > 0);
+  assert.strictEqual(act.log.writable, true);
+  assert.ok(Array.isArray(act.hashing) && Array.isArray(act.recent) && act.recent.length > 0);
+  ok('activity：下載中看得到 active（sent / total / mibps）、stats、config、recent');
+
+  req.destroy();
+  const after = await waitFor(async () => {
+    const a = await (await get('/activity')).json();
+    return !a.active.some((d) => d.path === 'big.bin') && a;
+  });
+  assert.ok(after, '斷線後 active 應移除');
+  const aborted = await waitFor(() => readAudit(fx.logDir).events.find((e) => e.path === 'big.bin' && e.result === 'aborted'));
+  assert.ok(aborted, '斷線應記 aborted');
+  assert.ok(aborted.bytes > 0 && aborted.bytes < 48 * 1024 * 1024);
+  assert.ok(after.recent.some((e) => e.path === 'big.bin' && e.result === 'aborted'));
+  ok('用戶端斷線 → active 移除、JSONL / recent 記 aborted');
+  fs.unlinkSync(bigPath);
+
+  // activity 不套代理 header 檢查以外的 IP 白名單（見小 app 測試）；無 token 仍 401
+  assert.strictEqual((await fetch(`${base}/activity`)).status, 401);
+  ok('activity 仍需 token');
+}
+
+/** files-audit 單元測試：被拒限流、過期清除、寫檔失敗不丟例外 */
+async function testAuditUnit(fx, ok) {
+  const dir = path.join(fx.base, 'audit-unit');
+  let clock = Date.parse('2026-11-11T12:00:00');
+  const warns = [];
+  const audit = createFilesAudit({ logDir: dir, logDays: 30, deniedPerMin: 3, now: () => clock, warn: (l) => warns.push(l) });
+  for (let i = 0; i < 5; i++) audit.record({ ip: '10.0.0.9', endpoint: 'list', status: 401, result: 'denied', reason: 'bad_token' });
+  audit.record({ ip: '10.0.0.8', endpoint: 'list', status: 401, result: 'denied', reason: 'bad_token' });
+  clock += 61 * 1000;
+  audit.flushSuppressed();
+  await audit.drain();
+  const lines = fs.readFileSync(path.join(dir, 'files-2026-11-11.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  assert.strictEqual(lines.filter((e) => e.ip === '10.0.0.9' && e.reason === 'bad_token').length, 3);
+  const sup = lines.find((e) => e.reason === 'suppressed');
+  assert.deepStrictEqual([sup.ip, sup.suppressed], ['10.0.0.9', 2]);
+  assert.strictEqual(lines.filter((e) => e.ip === '10.0.0.8').length, 1);
+  assert.strictEqual(audit.snapshot().stats.denied, 6, '統計計數不受限流影響');
+  ok('被拒限流：每 IP 每分鐘上限，超過只計數並補 suppressed 摘要');
+
+  for (const d of ['2026-10-11', '2026-10-12', '2026-10-01']) fs.writeFileSync(path.join(dir, `files-${d}.jsonl`), '');
+  const removed = await audit.cleanup();
+  const left = fs.readdirSync(dir).sort();
+  assert.strictEqual(removed, 2);
+  assert.deepStrictEqual(left, ['files-2026-10-12.jsonl', 'files-2026-11-11.jsonl']);
+  ok('過期清除：只刪超過 30 天的 files-YYYY-MM-DD.jsonl');
+
+  // 日誌目錄不可寫（指到一個檔案）：record 不丟例外，只警告
+  const blocker = path.join(fx.base, 'not-a-dir');
+  fs.writeFileSync(blocker, 'x');
+  const broken = createFilesAudit({ logDir: path.join(blocker, 'sub'), warn: (l) => warns.push(l) });
+  broken.record({ ip: '1.1.1.1', endpoint: 'raw', status: 200, result: 'ok', bytes: 10 });
+  await broken.drain();
+  assert.ok(warns.some((w) => w.includes('寫入失敗')));
+  assert.strictEqual(broken.snapshot().log.writable, false);
+  assert.strictEqual(broken.snapshot().stats.bytesSent, 10);
+  ok('日誌寫入失敗只警告、統計照常');
 }
 
 /** KABBY_FILES_ROOTS 多根目錄：設定解析 + 兩個根各自 list / stat / raw + 跨根逃逸 */
