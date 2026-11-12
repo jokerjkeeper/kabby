@@ -43,6 +43,8 @@
     .perm-badge.rw { background: var(--bg-teal-2); color: var(--fg-green-3); }
     .perm-badge.ro { background: var(--bg-yellow-4); color: var(--fg-yellow-2); }
     #topbar .spacer { flex: 1; }
+    /* 頂端按鈕底色由 inline style 換成灰 / 淡紅（不是 .btn 的藍底）→ 文字跟主題走（暗色 = 白、亮色 = 深色） */
+    #topbar .btn { color: var(--fg-1); }
     #topbar #view-toggle-btn.on { color: var(--fg-teal-3); }
     #topbar .me { color: var(--fg-blue); font-size: 12px; }
     #conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bg-17); }
