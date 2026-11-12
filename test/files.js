@@ -15,7 +15,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const express = require('express');
-const { createFilesRouter, parseFilesConfig } = require('../src/files');
+const { createFilesRouter, parseFilesConfig, parseAllowIps, ipAllowed } = require('../src/files');
 const { createFilesAudit, localDate } = require('../src/files-audit');
 
 const TOKEN = 'test-files-token';
@@ -251,6 +251,10 @@ async function main() {
   const srvDeny = await startMini({ root: fx.root, allowIps: '10.9.9.9' });
   const srvMapped = await startMini({ root: fx.root, allowIps: '::ffff:127.0.0.1' });
   const srvOff = await startMini({ root: null });
+  const srvWild = await startMini({ root: fx.root, allowIps: '127.0.0.*' });
+  const srvWildDeny = await startMini({ root: fx.root, allowIps: '10.1.129.*' });
+  const srvCidr = await startMini({ root: fx.root, allowIps: '10.0.0.1,127.0.0.0/8' });
+  const srvBad = await startMini({ root: fx.root, allowIps: '10.1.129.*x, abc' });
   try {
     const url = (srv, p) => `http://127.0.0.1:${srv.address().port}/api/files${p}`;
     assert.strictEqual((await fetch(url(srvDeny, '/list'))).status, 403);
@@ -263,13 +267,23 @@ async function main() {
     ok('未啟用時 activity 回 { enabled:false }');
     assert.strictEqual((await fetch(url(srvMapped, '/list'))).status, 200);
     ok('白名單寫 ::ffff: 形式也能比對');
+    assert.strictEqual((await fetch(url(srvWild, '/list'))).status, 200);
+    assert.strictEqual((await fetch(url(srvWildDeny, '/list'))).status, 403);
+    ok('白名單萬用字元 127.0.0.* 放行、10.1.129.* 擋下 127.0.0.1');
+    assert.strictEqual((await fetch(url(srvCidr, '/list'))).status, 200);
+    ok('白名單 CIDR 127.0.0.0/8 與單一 IP 混寫');
+    assert.strictEqual((await fetch(url(srvBad, '/list'))).status, 403);
+    assert.deepStrictEqual((await (await fetch(url(srvWild, '/activity'))).json()).config.allowIps, ['127.0.0.*']);
+    ok('白名單全部不合法 → 一律拒絕（不會變成不限）；activity 列出規則');
     assert.strictEqual((await fetch(url(srvOff, '/list'))).status, 404);
     assert.strictEqual((await fetch(url(srvOff, '/raw?path=x'))).status, 404);
     ok('KABBY_FILES_ROOT 未設 → 404');
   } finally {
     srvDeny.close(); srvMapped.close(); srvOff.close();
+    srvWild.close(); srvWildDeny.close(); srvCidr.close(); srvBad.close();
   }
 
+  testAllowIpsUnit(ok);
   await testMultiRoots(fx, ok);
   await testAuditUnit(fx, ok);
 
@@ -416,6 +430,51 @@ async function testAuditUnit(fx, ok) {
 }
 
 /** KABBY_FILES_ROOTS 多根目錄：設定解析 + 兩個根各自 list / stat / raw + 跨根逃逸 */
+/** KABBY_FILES_ALLOW_IPS 解析與比對（純函數） */
+function testAllowIpsUnit(ok) {
+  const allowed = (spec, ip) => ipAllowed(parseAllowIps(spec), ip);
+  assert.strictEqual(allowed('', '1.2.3.4'), true);
+  assert.strictEqual(allowed('  ', '1.2.3.4'), true);
+  ok('白名單空白 = 不限');
+
+  assert.strictEqual(allowed('10.1.129.*', '10.1.129.0'), true);
+  assert.strictEqual(allowed('10.1.129.*', '10.1.129.255'), true);
+  assert.strictEqual(allowed('10.1.129.*', '::ffff:10.1.129.88'), true);
+  assert.strictEqual(allowed('10.1.129.*', '10.1.130.1'), false);
+  assert.strictEqual(allowed('10.1.129.*', '110.1.129.1'), false);
+  assert.strictEqual(allowed('10.1.*.*', '10.1.200.3'), true);
+  assert.strictEqual(allowed('10.1.*.*', '10.2.0.1'), false);
+  ok('萬用字元：10.1.129.* 只放行該 /24、10.1.*.* = /16、IPv4-mapped 也比對');
+
+  assert.strictEqual(allowed('10.1.128.0/23', '10.1.129.77'), true);
+  assert.strictEqual(allowed('10.1.128.0/23', '10.1.130.1'), false);
+  assert.strictEqual(allowed('10.1.129.5/24', '10.1.129.200'), true, 'base 不在邊界也要套遮罩');
+  assert.strictEqual(allowed('10.1.129.16/28', '10.1.129.31'), true);
+  assert.strictEqual(allowed('10.1.129.16/28', '10.1.129.32'), false);
+  assert.strictEqual(allowed('0.0.0.0/0', '8.8.8.8'), true);
+  assert.strictEqual(allowed('192.168.1.20/32', '192.168.1.21'), false);
+  assert.strictEqual(allowed('255.255.255.0/24', '255.255.255.9'), true, '高位元 IP 不可變負數');
+  ok('CIDR：/23、/28、/0、/32、非邊界 base、高位元位址');
+
+  assert.strictEqual(allowed('10.1.129.20, 192.168.1.*', '192.168.1.9'), true);
+  assert.strictEqual(allowed('10.1.129.20, 192.168.1.*', '10.1.129.20'), true);
+  assert.strictEqual(allowed('10.1.129.20, 192.168.1.*', '10.1.129.21'), false);
+  assert.strictEqual(allowed('::1', '::1'), true);
+  assert.strictEqual(allowed('::1', '127.0.0.1'), false);
+  ok('單一 IP、萬用字元、IPv6 混寫');
+
+  for (const bad of ['*', '*.1.2.3', '10.*.1.5', '10.1.129.1*', '10.1.129', '10.1.129.256', '10.1.129.0/33',
+    '10.1.129.0/', '10.1.129.0/24/1', 'abc', '10.1.129.*/24']) {
+    const parsed = parseAllowIps(bad);
+    assert.deepStrictEqual(parsed.invalid, [bad], `應判為不合法：${bad}`);
+    assert.strictEqual(ipAllowed(parsed, '10.1.129.5'), false, `全部不合法要一律拒絕：${bad}`);
+  }
+  const mixed = parseAllowIps('bogus, 10.1.129.*');
+  assert.deepStrictEqual(mixed.invalid, ['bogus']);
+  assert.strictEqual(ipAllowed(mixed, '10.1.129.5'), true);
+  ok('不合法項目：單獨 *、中間 *、半段 *、超過 255、/33… 被略過；全不合法 → 全擋');
+}
+
 async function testMultiRoots(fx, ok) {
   // fixture：repo（腳本 + .git + 指向 models 的 junction）、models（權重檔）
   const repo = path.join(fx.base, 'repo');
