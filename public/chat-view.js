@@ -12,6 +12,9 @@
  *   opts.onSwitchToTerm () => void
  *   opts.onToast     (text, kind) => void
  *   opts.bindVoice   (btn, onText) => void   選用：🎙 按鈕
+ *   opts.readOnly    boolean   選用：初始唯讀（聊天室唯讀訪客；之後用 setReadOnly 切換）
+ *
+ * 回傳物件另有 setReadOnly(readOnly, hint)：停用輸入框 / 送出 / 中斷，hint 顯示在輸入框。
  */
 (function () {
   const POLL_MS = 1500;
@@ -99,6 +102,8 @@
     let visible = false;
     let disposed = false;
     let pendingSince = 0;        // 送出後等回應中（timestamp）；0 = 沒在等
+    let readOnly = false;        // 唯讀：只看不能送（聊天室唯讀訪客）
+    const DEFAULT_PLACEHOLDER = ta.placeholder;
     let statusNote = '';
 
     function nearBottom() { return scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 40; }
@@ -249,6 +254,7 @@
     // 送出：一律以 bracketed paste 包文字（多行不會被當成多次 Enter），稍後再補 \r 送出。
     // 文字與 \r 分兩次寫：cc（Ink）會把「同一批到達、含 \r 的輸入」當成貼上而只換行不送出。
     function submit() {
+      if (readOnly) return;
       const text = ta.value.replace(/\s+$/, '');
       if (!text.trim()) return;
       const body = text.replace(/\r?\n/g, '\r');
@@ -276,10 +282,22 @@
       const a = act.dataset.act;
       if (a === 'send') submit();
       else if (a === 'term') opts.onSwitchToTerm();
-      else if (a === 'esc') { opts.send('\x1b'); pendingSince = 0; paintState(); }
+      else if (a === 'esc') { if (readOnly) return; opts.send('\x1b'); pendingSince = 0; paintState(); }
     });
 
+    // 唯讀切換：輸入框、送出、中斷、🎙 一起停用（伺服器端另有權限檢查，這裡只是 UI）
+    function setReadOnly(v, hint) {
+      readOnly = !!v;
+      root.classList.toggle('read-only', readOnly);
+      ta.disabled = readOnly;
+      ta.placeholder = readOnly ? (hint || '唯讀：只能看對話，不能送出') : DEFAULT_PLACEHOLDER;
+      for (const b of root.querySelectorAll('[data-act="send"], [data-act="esc"], .chat-mic')) b.disabled = readOnly;
+      if (readOnly) { pendingSince = 0; paintState(); }
+    }
+    if (opts.readOnly) setReadOnly(true);
+
     function appendText(t) {
+      if (readOnly) return;
       if (window.KabbyVoice) window.KabbyVoice.appendToInput(ta, t);
       else { ta.value += t; ta.focus(); }
     }
@@ -290,7 +308,7 @@
       root.style.display = '';
       tick();
       if (!timer) timer = setInterval(tick, POLL_MS);
-      ta.focus();
+      if (!readOnly) ta.focus();
     }
     function hide() {
       visible = false;
@@ -303,6 +321,7 @@
       root.remove();
     }
 
-    return { show, hide, dispose, appendText, isVisible: () => visible, focus: () => ta.focus() };
+    return { show, hide, dispose, appendText, setReadOnly, isVisible: () => visible,
+      focus: () => { if (!readOnly) ta.focus(); } };
   };
 })();

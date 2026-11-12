@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <link rel="stylesheet" href="/theme.css" />
+  <link rel="stylesheet" href="/chat-view.css" />
   <script src="/theme.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>kabby 聊天室</title>
@@ -42,6 +43,7 @@
     .perm-badge.rw { background: var(--bg-teal-2); color: var(--fg-green-3); }
     .perm-badge.ro { background: var(--bg-yellow-4); color: var(--fg-yellow-2); }
     #topbar .spacer { flex: 1; }
+    #topbar #view-toggle-btn.on { color: var(--fg-teal-3); }
     #topbar .me { color: var(--fg-blue); font-size: 12px; }
     #conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bg-17); }
     #conn-dot.on { background: var(--bg-green-3); }
@@ -49,7 +51,11 @@
 
     /* Main: terminal + chat */
     #layout { flex: 1; display: flex; min-height: 0; }
+    /* 終端欄：不捲動的外框，對話視圖（chat-view.js）疊在這層上；#term-side 自己捲動 */
+    #term-col { flex: 1 1 auto; min-width: 0; min-height: 0; position: relative; display: flex; }
     #term-side { flex: 1 1 auto; min-width: 0; position: relative; overflow: auto; background: var(--term-bg); padding: 4px; }
+    #view-toggle-btn { display: none; background: var(--bg-11); }
+    #view-toggle-btn.ready { display: inline-block; }
     #term-side .xterm { height: auto; }
 
     /* 細線暗色捲軸：取代暗色介面裡的 Windows 預設粗灰捲軸（終端外層 + xterm viewport + 聊天/對話記錄） */
@@ -322,15 +328,18 @@
     <button class="btn" id="master-close-btn" style="background:var(--bg-red-4); display:none" title="關閉整個聊天室（所有人被斷開；session 不受影響）">關房</button>
     <button class="btn" id="term-voice-btn" style="background:var(--bg-11); display:none" title="🎙 按住說話，放開後把文字打進終端（不會自動按 Enter，確認後自己在終端按 Enter 送出）">🎙 對終端說</button>
     <button class="btn" id="theme-btn" style="background:var(--bg-11)">☀</button>
+    <button class="btn" id="view-toggle-btn" title="在「終端｜對話」之間切換（對話視圖讀 cc 的對話存檔；權限確認與 / 選單仍需在終端操作）">💬 對話</button>
     <button class="btn" id="convo-btn" style="background:var(--bg-11)" title="乾淨排版的完整對話記錄（讀對話存檔，不受終端重繪影響，獨立捲動）">📜 對話記錄</button>
     <button class="btn" id="pause-btn" style="background:var(--bg-11)" title="切到自己畫面：定格終端慢慢看，不被房主的輸出/捲動打擾；聊天不受影響">⏸ 看自己畫面</button>
     <button class="btn" id="leave-btn" style="background:var(--bg-11)" title="離開聊天室（清掉本機入場券）">離開</button>
   </div>
 
   <div id="layout">
-    <div id="term-side">
-      <div id="frozen-hint">⏸ 自己畫面 — 已定格，房主那邊的新輸出暫存中</div>
-      <button id="scroll-latest">↓ 回房主畫面</button>
+    <div id="term-col">
+      <div id="term-side">
+        <div id="frozen-hint">⏸ 自己畫面 — 已定格，房主那邊的新輸出暫存中</div>
+        <button id="scroll-latest">↓ 回房主畫面</button>
+      </div>
     </div>
     <aside id="chat-side">
       <div id="chat-resize" title="拖曳調整聊天欄寬度"></div>
@@ -388,6 +397,7 @@
 
   <script src="https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js"></script>
   <script src="/convo-view.js"></script>
+  <script src="/chat-view.js"></script>
   <script src="/voice.js"></script>
   <script src="/room.js"></script>
 </body>

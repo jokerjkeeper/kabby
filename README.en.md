@@ -110,6 +110,7 @@ The chat button at the top right opens a side panel: create a room, bind it to a
 Guests open `http://<host>:3700/room.html` (or a copied link carrying `?key=`), enter the key and a nickname, and they are in:
 
 - **Watch the terminal**: the bound session's live screen including scrollback replay, following the host's terminal size
+- **Terminal | chat toggle**: "💬 對話" in the top bar switches to the same chat view the host has (tool cards + markdown replies); people with input rights can ask cc from the box at the bottom, while read-only or frozen guests get a disabled box and can only read
 - **Text chat**: last 200 messages; supports **images** (Ctrl+V a screenshot or pick a file — compressed client-side, sent over WS, kept in memory, 20 most recent per room) and **@mentions** (autocomplete over room members, highlights the person tagged)
 - **Permissions**: each room has an input toggle that is **read-only by default**; the host can flip it live, and the read-only check is enforced server-side, not hidden in the frontend
 - **Isolation**: a guest key only grants the WS of that room's bound session plus chat — no other API is reachable

@@ -362,6 +362,21 @@ app.get('/api/rooms/guest/conversation', async (req, res) => {
   }
 });
 
+// 訪客的對話視圖（終端｜對話 互切）增量 items（ticket 認證，在 token middleware 之前）。
+// ?ticket=&key=&after= 與房主的 /api/sessions/:id/chat 相同；只讀，送出仍走訪客 WS（受寫入權管制）。
+app.get('/api/rooms/guest/chat', async (req, res) => {
+  const resolved = roomRegistry.resolveTicket(req.query.ticket || '');
+  if (!resolved) return res.status(401).json({ error: 'ticket 無效或房間已關閉' });
+  const session = registry.get(resolved.room.sessionId);
+  if (!session) return res.status(404).json({ error: 'session 已結束' });
+  try {
+    const after = req.query.after === undefined ? -1 : parseInt(req.query.after, 10);
+    res.json(await readSessionChat(session, String(req.query.key || ''), after));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 其餘 /api/* 一律要 token（health / rooms/join / rooms/guest/* 已在上面先處理，不受影響）
 app.use('/api', (req, res, next) => {
   if (tokenOk(req)) return next();

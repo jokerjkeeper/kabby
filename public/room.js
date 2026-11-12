@@ -163,6 +163,7 @@
   // ── 入房表單（note = 頂部提示，例如「房間已關閉」）──
   function showJoinForm(note) {
     overlay.classList.remove('hidden');
+    disposeChatView();
     joinBox.innerHTML = `
       <h2>進入 kabby 聊天室</h2>
       <div class="sub">輸入房主給你的密碼與你的暱稱（密碼決定你的角色：房主／協作／訪客）</div>
@@ -294,6 +295,10 @@
     }
     setFrozen(false, true);
     connect();
+    viewToggleBtn.classList.add('ready');
+    let savedView = 'term';
+    try { savedView = localStorage.getItem(VIEW_KEY) || 'term'; } catch {}
+    setView(savedView, false);
     voice.recheck();   // 有 ticket 了 → 立刻探測語音服務，不等下一輪輪詢
   }
 
@@ -361,6 +366,59 @@
   });
   document.getElementById('convo-btn').addEventListener('click', () => convoView.toggle());
 
+  // ── 終端｜對話 互切（對話視圖在共用的 chat-view.js；cc 照樣跑在 PTY）──
+  // 讀取走 ticket 路由；送出走訪客 WS input，跟終端打字一樣受寫入權管制（唯讀時輸入框停用）
+  const VIEW_KEY = 'kabby-room-view';
+  const viewToggleBtn = document.getElementById('view-toggle-btn');
+  let chatView = null;
+  let currentView = 'term';
+
+  function readOnlyHint() {
+    if (typeof roomFrozen !== 'undefined' && roomFrozen) return '房主已凍結輸入：目前只能看對話';
+    return '唯讀：房主未開放輸入，只能看對話';
+  }
+  function ensureChatView() {
+    if (chatView) return chatView;
+    chatView = window.createChatView({
+      host: document.getElementById('term-col'),
+      readOnly: !allowWrite,
+      fetchChat: async (key, after) => {
+        if (!joinInfo) throw new Error('尚未入房');
+        const q = '?ticket=' + encodeURIComponent(joinInfo.ticket)
+          + '&key=' + encodeURIComponent(key || '') + '&after=' + after;
+        const res = await fetch('/api/rooms/guest/chat' + q);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        return data;
+      },
+      send: (data) => {
+        if (!allowWrite || !ws || ws.readyState !== WebSocket.OPEN) return false;
+        ws.send(JSON.stringify({ type: 'input', data }));
+        return true;
+      },
+      onSwitchToTerm: () => setView('term'),
+      onToast: showToast,
+    });
+    if (!allowWrite) chatView.setReadOnly(true, readOnlyHint());
+    return chatView;
+  }
+  function setView(v, persist = true) {
+    currentView = v === 'chat' ? 'chat' : 'term';
+    if (persist) { try { localStorage.setItem(VIEW_KEY, currentView); } catch {} }
+    if (currentView === 'chat') ensureChatView().show();
+    else if (chatView) chatView.hide();
+    viewToggleBtn.textContent = currentView === 'chat' ? '⌨ 終端' : '💬 對話';
+    viewToggleBtn.classList.toggle('on', currentView === 'chat');
+  }
+  // 離房 / 房間關閉：停止輪詢並拆掉（舊 ticket 已失效；下次進房重建）
+  function disposeChatView() {
+    if (chatView) { chatView.dispose(); chatView = null; }
+    currentView = 'term';
+    viewToggleBtn.classList.remove('on', 'ready');
+    viewToggleBtn.textContent = '💬 對話';
+  }
+  viewToggleBtn.addEventListener('click', () => setView(currentView === 'chat' ? 'term' : 'chat'));
+
   // 依角色更新 UI：角色徽章、房主工具列顯示、訪客名單踢人鈕
   function applyRole(r) {
     role = r || 'guest';
@@ -388,6 +446,7 @@
 
   function setAllowWrite(v, silent) {
     allowWrite = !!v;
+    if (chatView) chatView.setReadOnly(!allowWrite, readOnlyHint());
     permBadge.className = 'perm-badge ' + (allowWrite ? 'rw' : 'ro');
     permBadge.textContent = allowWrite ? '可輸入' : '唯讀';
     permBadge.title = allowWrite

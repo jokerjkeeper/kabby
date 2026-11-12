@@ -261,6 +261,10 @@ ticket 是之後 WS 連線的憑證（`/ws/:sessionId?ticket=`，內含角色）
 訪客看綁定 session 的乾淨版對話記錄（讀 provider 對話 JSONL，跟監控頁同一套採集器）。回 `{ turns: [{ ts, role, text, model?, tokens? }] }`；找不到存檔回 `{ turns: [], notFound: true }`。不回傳 `file` 等本機路徑。
 定位規則：resume 的 session 直接用該對話 id；新 session 取該 cwd 下「PTY 啟動後仍有更新」的最新一份（若同 cwd 另有 kabby 之外的活躍 cc，可能對應錯，屬已知限制）。
 
+### `GET /api/rooms/guest/chat?ticket=&key=&after=`（**ticket 認證**，不需 token）
+
+訪客頁「💬 對話」視圖的增量 items。`key` / `after` 與回應格式同房主的 [`GET /api/sessions/:id/chat`](#get-apisessionsidchatkeyafter)。只讀：送出訊息仍走訪客的終端 WS `input`，受房間寫入權管制（唯讀 / 凍結時伺服器端擋下）。ticket 無效 `401`、session 已結束 `404`。
+
 ### `GET /api/rooms`（token）
 
 列所有房間，含三組密碼（`masterPass`/`collabPass`/`guestPass`，供房主端顯示）、三組邀請碼（`masterInvite`/`collabInvite`/`guestInvite`，用來組不含明文密碼的入房連結 `/room.html?invite=<token>`）、`frozen`、`guests: [{ ticket, nickname, role, joinedAt, online }]`。

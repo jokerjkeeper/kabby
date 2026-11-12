@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <link rel="stylesheet" href="/theme.css" />
+  <link rel="stylesheet" href="/chat-view.css" />
   <script src="/theme.js"></script>
   <title>kabby</title>
   <link rel="stylesheet" href="https://unpkg.com/@xterm/xterm@5.5.0/css/xterm.css" />
@@ -631,82 +632,8 @@
     #host-convo-btn.on { background: var(--bg-teal-2); color: var(--fg-teal-3); }
     .cv-empty { color: var(--fg-13); text-align: center; padding: 40px 20px; line-height: 1.8; }
 
-    /* ── 對話視圖（pane 內「終端｜對話」互切；chat-view.js）── */
-    #view-toggle-btn.on { background: var(--bg-teal-2); color: var(--fg-teal-3); }
-    .chat-pane {
-      position: absolute; inset: 0; z-index: 5;   /* 疊在 xterm 上：終端尺寸不變、切回不用 refit */
-      background: var(--bg-3); display: flex; flex-direction: column;
-    }
+    /* 對話視圖樣式在 /chat-view.css（主頁與聊天室共用）；這裡只留 pane 專屬的 */
     .term-pane.chat-mode > .pane-close { z-index: 6; }
-    .chat-scroll {
-      flex: 1; overflow-y: auto; padding: 14px 18px 8px;
-      scrollbar-width: thin; scrollbar-color: var(--line-7) transparent;
-    }
-    .chat-list { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
-    .cv-msg.user { display: flex; flex-direction: column; align-items: flex-end; }
-    /* 長訊息摺疊（chat-view.js makeFoldable）*/
-    .cv-fold.collapsed {
-      max-height: 180px; overflow: hidden;
-      -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent);
-              mask-image: linear-gradient(to bottom, #000 70%, transparent);
-    }
-    .cv-fold-btn {
-      margin-top: 4px; background: transparent; border: 1px solid var(--line-6); border-radius: 4px;
-      color: var(--fg-10); font-size: 11px; padding: 2px 10px; cursor: pointer;
-    }
-    .cv-fold-btn:hover { color: var(--fg-3); border-color: var(--line-9); }
-    .cv-bubble {
-      max-width: 80%; white-space: pre-wrap; word-break: break-word;
-      background: var(--bg-teal); border: 1px solid var(--line-teal); border-radius: 8px;
-      padding: 8px 12px; color: var(--fg-3); font-size: 13px; line-height: 1.55;
-    }
-    .cv-msg.assistant .cv-text { border-left: 3px solid var(--line-orange-4); border-radius: 0 6px 6px 0; }
-    .cv-card {
-      border: 1px solid var(--line-5); border-radius: 6px; background: var(--bg-4); font-size: 12px;
-    }
-    .cv-card-head {
-      display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer;
-      font-family: 'Cascadia Code', Consolas, monospace; color: var(--fg-8); min-width: 0;
-    }
-    .cv-card-head:hover { background: var(--bg-7); }
-    .cv-card .cv-ico { color: var(--fg-12); width: 12px; text-align: center; }
-    .cv-card .cv-name { color: var(--fg-3); font-weight: 600; }
-    .cv-card .cv-sum { flex: 1; min-width: 0; color: var(--fg-11); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .cv-card .cv-st { flex: 0 0 auto; }
-    .cv-st.ok { color: var(--fg-green); } .cv-st.err { color: var(--fg-red); } .cv-st.run { color: var(--fg-yellow); }
-    .cv-card-body { display: none; padding: 0 10px 8px; }
-    .cv-card.open .cv-card-body { display: block; }
-    .cv-card.open { border-color: var(--line-7); }
-    .cv-file { color: var(--fg-blue); font-family: 'Cascadia Code', Consolas, monospace; margin: 4px 0; word-break: break-all; }
-    .cv-pre {
-      margin: 4px 0; padding: 6px 8px; background: var(--bg-1); border: 1px solid var(--line-3); border-radius: 4px;
-      font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; line-height: 1.45;
-      white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto; color: var(--fg-7);
-    }
-    .cv-pre.del { background: var(--bg-red); border-color: var(--line-red); color: var(--fg-red-5); }
-    .cv-pre.add { background: var(--bg-green); border-color: var(--line-green); color: var(--fg-green-5); }
-    .cv-pre.err { border-color: var(--line-red); color: var(--fg-red-5); }
-    .cv-result-label { color: var(--fg-13); font-size: 11px; margin-top: 6px; }
-    .cv-todos { list-style: none; margin: 4px 0; padding: 0; color: var(--fg-7); }
-    .cv-todos li.completed { color: var(--fg-13); text-decoration: line-through; }
-    .cv-todos li.in_progress { color: var(--fg-yellow); }
-    .cv-skip { color: var(--fg-13); font-size: 11px; text-align: center; padding: 4px; }
-    .chat-banner {
-      display: flex; align-items: center; gap: 10px; justify-content: center;
-      padding: 6px 12px; background: var(--bg-yellow-2); color: var(--fg-yellow-3); font-size: 12px; border-top: 1px solid var(--line-yellow);
-    }
-    .chat-input { flex: 0 0 auto; border-top: 1px solid var(--line-5); padding: 8px 12px 10px; background: var(--bg-2); }
-    .chat-input textarea {
-      width: 100%; box-sizing: border-box; resize: none; background: var(--bg-4); color: var(--fg-3);
-      border: 1px solid var(--line-6); border-radius: 6px; padding: 8px 10px; outline: none;
-      font-family: inherit; font-size: 13px; line-height: 1.5;
-    }
-    .chat-input textarea:focus { border-color: var(--line-orange-4); }
-    .chat-actions { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
-    .chat-actions .spacer { flex: 1; }
-    .chat-state { color: var(--fg-12); font-size: 12px; }
-    .chat-dots::after { content: '…'; animation: chatDots 1.2s steps(3) infinite; display: inline-block; width: 1.2em; overflow: hidden; vertical-align: bottom; }
-    @keyframes chatDots { 0% { width: .4em; } 100% { width: 1.2em; } }
 
     /* ── 監控頁（modal overlay）─────────────────────────────────────── */
     .modal.monitor {
