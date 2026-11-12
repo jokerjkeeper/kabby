@@ -86,6 +86,7 @@ npm run dist        # 打包成 Windows portable exe
 - **多 tab + 分割 pane**：`Ctrl+Shift+←/→` 切 tab、`Ctrl+Shift+D/E` 左右/上下分割，每個 pane 是一個獨立 session
 - **Provider**：Claude Code 與 Codex 都能開，建 session 時選
 - **敏感詞攔截**：送出的輸入在伺服器端比對詞庫，命中直接擋下不進 PTY
+- **暗色 / 亮色主題**：右上角 ☀ / 🌙 切換，所有頁面（主頁、聊天室、檔案傳輸、embed）共用，選擇記在瀏覽器；沒選過時跟隨系統設定。終端本身維持暗色。iframe 嵌入可用 `?theme=light` 指定
 
 ### 對話視圖（終端｜對話 互切）
 

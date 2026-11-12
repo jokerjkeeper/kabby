@@ -418,7 +418,7 @@
       // 有 /rename 自訂名 → 名字當主標、首句摘要降級為副標；沒有就照舊只顯示摘要
       const titleRow = h.title
         ? `<div class="summary"><span class="title">${escapeHtml(h.title)}</span> <span class="badge named" title="cc /rename 設定的名稱">named</span></div>
-           <div class="meta" style="color:#666">${escapeHtml(h.summary || '(無摘要)')}</div>`
+           <div class="meta" style="color:var(--fg-14)">${escapeHtml(h.summary || '(無摘要)')}</div>`
         : `<div class="summary">${escapeHtml(h.summary || '(無摘要)')}</div>`;
       item.innerHTML = `
         ${titleRow}
@@ -1039,7 +1039,7 @@
     if (sid !== leafLiveTargetSid) {
       leafLiveTargetSid = sid;
       leafLiveProvider = (leaf.info && leaf.info.provider) || 'claude'; // 依 session 的 provider 路由 analysis
-      el.querySelector('.ll-body').innerHTML = '<div style="padding:6px;color:#888">載入…</div>';
+      el.querySelector('.ll-body').innerHTML = '<div style="padding:6px;color:var(--fg-12)">載入…</div>';
       leafLiveRefresh();
     }
     leafLiveStart();
@@ -1067,7 +1067,7 @@
     const dot = el.querySelector('.ll-dot2');
     const act = monIsActive(a);
     dot.textContent = act ? '●' : '○';
-    dot.style.color = act ? '#4caf50' : '#777';
+    dot.style.color = act ? 'var(--fg-ok)' : 'var(--fg-13)';
     const rows = [];
     for (let i = turns.length - 1; i >= 0 && rows.length < 15; i--) {
       const t = turns[i];
@@ -1080,7 +1080,7 @@
         ? `<div class="ll-ing">↑ #${prev.order + 1} ${monEsc(prev.tools[0].name)} 結果</div>` : '';
       rows.push(`<div class="ll-row${spike ? ' spike' : ''}"><div class="ll-r1"><span class="ll-n">#${t.order + 1}</span><span class="ll-cost">${monFmtUsd(t.costUsd)}</span><span class="ll-tools">${spike ? '🔴 ' : ''}${tools}</span></div><div class="ll-r2">out <b>${monFmtK(t.tokens.output)}</b> · cw <b class="${spike ? 'hot' : ''}">${monFmtK(cw)}</b> · cr ${monFmtK(t.tokens.cacheRead)}</div>${ing}</div>`);
     }
-    el.querySelector('.ll-body').innerHTML = rows.join('') || '<div style="padding:6px;color:#888">無逐輪資料</div>';
+    el.querySelector('.ll-body').innerHTML = rows.join('') || '<div style="padding:6px;color:var(--fg-12)">無逐輪資料</div>';
   }
 
   function leafLiveToggle() {
@@ -1272,7 +1272,7 @@
   function updateStatusbar(leaf) {
     if (!leaf || !leaf.sessionId) {
       statusText.textContent = leaf ? '空 pane — 點 sidebar 填入 session' : '未選擇 session';
-      statusText.style.color = '#888';
+      statusText.style.color = 'var(--fg-12)';
       metaEl.textContent = '';
       killBtn.style.display = 'none';
       redrawBtn.style.display = 'none';
@@ -1284,7 +1284,7 @@
     }
     const s = leaf.info || {};
     statusText.textContent = leaf.connected ? `${s.name} · connected` : `${s.name} · disconnected`;
-    statusText.style.color = leaf.connected ? '#4caf50' : '#f44336';
+    statusText.style.color = leaf.connected ? 'var(--fg-ok)' : 'var(--fg-err)';
     const resumeTail = s.resumeSessionId
       ? ` · ${s.provider === 'codex' ? 'codex' : 'cc'}:${s.resumeSessionId.slice(0, 8)}`
       : '';
@@ -1303,7 +1303,7 @@
   let flashTimer = null;
   function flashStatus(msg) {
     statusText.textContent = msg;
-    statusText.style.color = '#d7ba7d';
+    statusText.style.color = 'var(--fg-yellow)';
     if (flashTimer) clearTimeout(flashTimer);
     flashTimer = setTimeout(() => updateStatusbar(leaves.get(focusedPaneId) || null), 1800);
   }
@@ -1858,7 +1858,7 @@
         <div class="rc-meta">綁定：${escapeHtml(room.sessionName || room.sessionId.slice(0, 8))}</div>
         ${passRows}
         <div class="rc-guests">${room.guests.map((g) =>
-          `<span class="rc-guest-chip ${g.online ? 'online' : ''}" title="角色：${ROLE_LABEL[g.role] || g.role}">${escapeHtml(g.nickname)}<span style="opacity:.6;font-size:9px"> ${ROLE_LABEL[g.role] || ''}</span></span>`).join('') || '<span style="color:#666;font-size:10px">還沒有訪客</span>'}</div>
+          `<span class="rc-guest-chip ${g.online ? 'online' : ''}" title="角色：${ROLE_LABEL[g.role] || g.role}">${escapeHtml(g.nickname)}<span style="opacity:.6;font-size:9px"> ${ROLE_LABEL[g.role] || ''}</span></span>`).join('') || '<span style="color:var(--fg-14);font-size:10px">還沒有訪客</span>'}</div>
         <div class="rc-actions">
           <label class="rc-write-toggle" title="凍結全房輸入（協作者暫為唯讀；房主不受影響），即時生效、伺服器端強制">
             <input type="checkbox" data-action="freeze" ${room.frozen ? 'checked' : ''} /> 凍結
@@ -1962,7 +1962,7 @@
     roomWs = ws;
     ws.onopen = () => {
       roomChatConnEl.textContent = '● 已連線';
-      roomChatConnEl.style.color = '#4caf50';
+      roomChatConnEl.style.color = 'var(--fg-ok)';
       setRoomChatEnabled(true);
     };
     ws.onmessage = (event) => {
@@ -1985,7 +1985,7 @@
     ws.onclose = () => {
       if (roomWs === ws) {
         roomChatConnEl.textContent = '○ 已斷線';
-        roomChatConnEl.style.color = '#f44336';
+        roomChatConnEl.style.color = 'var(--fg-err)';
         setRoomChatEnabled(false);
       }
     };
@@ -2209,7 +2209,7 @@
   function closeMonitor() { monModal.classList.remove('visible'); monLiveDisconnect(); monStopConvoLive(); monStopTabLive(); }
 
   async function loadMonitor() {
-    monTotals.innerHTML = '<span style="color:#888">載入中…</span>';
+    monTotals.innerHTML = '<span style="color:var(--fg-12)">載入中…</span>';
     try {
       const [usage, sens] = await Promise.all([
         apiFetch(monUrl('/api/usage')).then((r) => r.json()),
@@ -2222,7 +2222,7 @@
       monRenderRateLimits(usage.rateLimits);
     } catch (err) {
       if (err.message === 'unauthorized') return; // apiFetch 已彈登入
-      monTotals.innerHTML = '<span style="color:#f48771">載入失敗：' + monEsc(err.message) + '</span>';
+      monTotals.innerHTML = '<span style="color:var(--fg-red-3)">載入失敗：' + monEsc(err.message) + '</span>';
     }
   }
 
@@ -2336,10 +2336,10 @@
     const rows = sessions.map((s) => {
       const models = Object.keys(s.models || {}).join(', ') || '-';
       const sw = s.sensitiveHitCount || 0;
-      const summary = monEsc(s.summary) || '<span style="color:#666">(空)</span>';
+      const summary = monEsc(s.summary) || '<span style="color:var(--fg-14)">(空)</span>';
       return `<tr class="sess-row" data-sid="${monEsc(s.sessionId)}">
         <td><div class="mon-summary" title="${monEsc(s.summary)}">${summary}</div>
-            <div style="color:#666;font-size:10px">${monEsc(s.sessionId.slice(0, 8))} · ${monEsc(s.cwd || s.projectDir || '')}</div></td>
+            <div style="color:var(--fg-14);font-size:10px">${monEsc(s.sessionId.slice(0, 8))} · ${monEsc(s.cwd || s.projectDir || '')}</div></td>
         <td class="mon-model">${monEsc(models)}</td>
         <td class="num">${monFmt(s.turns)}</td>
         <td class="num">${monFmt(s.tokens.input)}</td>
@@ -2347,9 +2347,9 @@
         <td class="num">${monFmt(s.tokens.cacheRead)}</td>
         <td class="num mon-cost">${monFmtUsd(s.costUsd)}</td>
         <td class="num">${sw ? `<span class="mon-sw-count">${sw}</span>` : '-'}</td>
-        <td style="color:#888;white-space:nowrap">${monFmtTs(s.lastTs)}</td>
+        <td style="color:var(--fg-12);white-space:nowrap">${monFmtTs(s.lastTs)}</td>
       </tr>
-      <tr class="convo-row" data-for="${monEsc(s.sessionId)}" style="display:none"><td colspan="9" style="background:#1b1b1b"><div class="convo-body"></div></td></tr>`;
+      <tr class="convo-row" data-for="${monEsc(s.sessionId)}" style="display:none"><td colspan="9" style="background:var(--bg-2)"><div class="convo-body"></div></td></tr>`;
     }).join('');
     monUsageEl.innerHTML = `<table class="mon-table">
       <thead><tr><th>Session</th><th>Model</th><th>Turns</th><th>Input</th><th>Output</th><th>Cache讀</th><th>成本</th><th>敏感</th><th>最後活動</th></tr></thead>
@@ -2372,7 +2372,7 @@
     monConvoOpen = true;
     monStopConvoLive(); // 切換到別的 session 前先停舊輪詢
     const body = convoRow.querySelector('.convo-body');
-    body.innerHTML = '<div style="color:#888;padding:8px">分析中…</div>';
+    body.innerHTML = '<div style="color:var(--fg-12);padding:8px">分析中…</div>';
     try {
       // 並行抓「成本歸因」與「完整對話」
       const [analysis, c] = await Promise.all([
@@ -2392,7 +2392,7 @@
       monMaybeStartConvoLive(sid, analysis, convoRow); // 進行中才輪詢
     } catch (err) {
       if (err.message === 'unauthorized') return;
-      body.innerHTML = '<div style="color:#f48771;padding:8px">載入失敗：' + monEsc(err.message) + '</div>';
+      body.innerHTML = '<div style="color:var(--fg-red-3);padding:8px">載入失敗：' + monEsc(err.message) + '</div>';
     }
   }
 
@@ -2555,7 +2555,7 @@
   }
   async function monLoadLiveTab() {
     monStopTabLive();
-    monLiveTabEl.innerHTML = '<div style="color:#888;padding:8px">尋找最近活動 session…</div>';
+    monLiveTabEl.innerHTML = '<div style="color:var(--fg-12);padding:8px">尋找最近活動 session…</div>';
     let sessions = [];
     try {
       const usage = await apiFetch(monUrl('/api/usage')).then((r) => r.json());
@@ -2603,13 +2603,13 @@
   document.getElementById('mon-refresh').addEventListener('click', loadMonitor);
   document.getElementById('mon-rebuild').addEventListener('click', async () => {
     if (!confirm('重審歷史：砍索引從頭全掃，重新計算所有既有對話的 token/成本（套用 requestId 去重修正，數字會校正到正確值）並套用目前敏感詞庫。資料量大時較久，確定？')) return;
-    monTotals.innerHTML = '<span style="color:#888">重審中（全掃）…</span>';
+    monTotals.innerHTML = '<span style="color:var(--fg-12)">重審中（全掃）…</span>';
     try {
       await apiFetch(monUrl('/api/usage?rebuild=1')).then((r) => r.json());
       await loadMonitor();
     } catch (err) {
       if (err.message === 'unauthorized') return;
-      monTotals.innerHTML = '<span style="color:#f48771">重審失敗：' + monEsc(err.message) + '</span>';
+      monTotals.innerHTML = '<span style="color:var(--fg-red-3)">重審失敗：' + monEsc(err.message) + '</span>';
     }
   });
 

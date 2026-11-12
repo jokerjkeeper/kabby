@@ -2,6 +2,8 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8" />
+  <link rel="stylesheet" href="/theme.css" />
+  <script src="/theme.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>kabby 聊天室</title>
   <link rel="stylesheet" href="https://unpkg.com/@xterm/xterm@5.5.0/css/xterm.css" />
@@ -9,8 +11,8 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
     body {
-      background: #1e1e1e;
-      color: #d4d4d4;
+      background: var(--bg-3);
+      color: var(--fg-5);
       font-family: 'Segoe UI', system-ui, sans-serif;
       font-size: 13px;
       display: flex;
@@ -20,8 +22,8 @@
 
     /* Top bar */
     #topbar {
-      background: #2d2d2d;
-      border-bottom: 1px solid #333;
+      background: var(--bg-9);
+      border-bottom: 1px solid var(--line-5);
       padding: 6px 14px;
       display: flex;
       align-items: center;
@@ -29,52 +31,52 @@
       min-height: 34px;
       flex: 0 0 auto;
     }
-    #topbar .room-name { font-weight: 600; color: #f0f0f0; }
-    #topbar .session-name { color: #888; font-size: 12px; }
+    #topbar .room-name { font-weight: 600; color: var(--fg-2); }
+    #topbar .session-name { color: var(--fg-12); font-size: 12px; }
     .perm-badge {
       border-radius: 10px;
       padding: 1px 10px;
       font-size: 11px;
       font-weight: 600;
     }
-    .perm-badge.rw { background: #2d5a4a; color: #8fdca0; }
-    .perm-badge.ro { background: #5a4a1d; color: #ffd97a; }
+    .perm-badge.rw { background: var(--bg-teal-2); color: var(--fg-green-3); }
+    .perm-badge.ro { background: var(--bg-yellow-4); color: var(--fg-yellow-2); }
     #topbar .spacer { flex: 1; }
-    #topbar .me { color: #9cdcfe; font-size: 12px; }
-    #conn-dot { width: 8px; height: 8px; border-radius: 50%; background: #888; }
-    #conn-dot.on { background: #4caf50; }
-    #conn-dot.off { background: #f44336; }
+    #topbar .me { color: var(--fg-blue); font-size: 12px; }
+    #conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bg-17); }
+    #conn-dot.on { background: var(--bg-green-3); }
+    #conn-dot.off { background: var(--bg-red-6); }
 
     /* Main: terminal + chat */
     #layout { flex: 1; display: flex; min-height: 0; }
-    #term-side { flex: 1 1 auto; min-width: 0; position: relative; overflow: auto; background: #1e1e1e; padding: 4px; }
+    #term-side { flex: 1 1 auto; min-width: 0; position: relative; overflow: auto; background: var(--term-bg); padding: 4px; }
     #term-side .xterm { height: auto; }
 
     /* 細線暗色捲軸：取代暗色介面裡的 Windows 預設粗灰捲軸（終端外層 + xterm viewport + 聊天/對話記錄） */
     #term-side, #chat-msgs, #convo-body, .mention-pop, .xterm-viewport {
       scrollbar-width: thin;
-      scrollbar-color: #4a4a4a transparent;
+      scrollbar-color: var(--line-8) transparent;
     }
     #term-side::-webkit-scrollbar, #chat-msgs::-webkit-scrollbar, #convo-body::-webkit-scrollbar,
     .mention-pop::-webkit-scrollbar, .xterm-viewport::-webkit-scrollbar { width: 6px; height: 6px; }
     #term-side::-webkit-scrollbar-track, #chat-msgs::-webkit-scrollbar-track, #convo-body::-webkit-scrollbar-track,
     .mention-pop::-webkit-scrollbar-track, .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
     #term-side::-webkit-scrollbar-thumb, #chat-msgs::-webkit-scrollbar-thumb, #convo-body::-webkit-scrollbar-thumb,
-    .mention-pop::-webkit-scrollbar-thumb, .xterm-viewport::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 4px; }
+    .mention-pop::-webkit-scrollbar-thumb, .xterm-viewport::-webkit-scrollbar-thumb { background: var(--bg-13); border-radius: 4px; }
     #term-side::-webkit-scrollbar-thumb:hover, #chat-msgs::-webkit-scrollbar-thumb:hover, #convo-body::-webkit-scrollbar-thumb:hover,
-    .mention-pop::-webkit-scrollbar-thumb:hover, .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #6a6a6a; }
+    .mention-pop::-webkit-scrollbar-thumb:hover, .xterm-viewport::-webkit-scrollbar-thumb:hover { background: var(--bg-16); }
     #term-side::-webkit-scrollbar-corner, .xterm-viewport::-webkit-scrollbar-corner { background: transparent; }
     /* 「回到最新」浮鈕：訪客往上捲（本地）時出現 */
     #scroll-latest {
       position: absolute; right: 18px; bottom: 14px; z-index: 20;
-      background: #0e639c; color: #fff; border: 0; border-radius: 14px;
+      background: var(--bg-blue-4); color: #fff; border: 0; border-radius: 14px;
       padding: 5px 14px; font-size: 12px; cursor: pointer;
       box-shadow: 0 3px 10px rgba(0,0,0,0.5); display: none;
     }
-    #scroll-latest:hover { background: #1177bb; }
+    #scroll-latest:hover { background: var(--bg-blue-5); }
     #scroll-latest.visible { display: block; }
     /* 暫停跟隨中的狀態 */
-    #pause-btn.paused { background: #5a4a1d; color: #ffd97a; }
+    #pause-btn.paused { background: var(--bg-yellow-4); color: var(--fg-yellow-2); }
     #frozen-hint {
       position: absolute; left: 50%; top: 8px; transform: translateX(-50%); z-index: 20;
       background: rgba(90,74,29,0.95); color: #ffd97a; border-radius: 12px;
@@ -91,96 +93,96 @@
     #convo-panel.visible { display: flex; }
     #convo-box {
       width: min(960px, 94vw); height: 88vh;
-      background: #1e1e1e; border: 1px solid #444; border-radius: 8px;
+      background: var(--bg-3); border: 1px solid var(--line-7); border-radius: 8px;
       display: flex; flex-direction: column; overflow: hidden;
       box-shadow: 0 12px 40px rgba(0,0,0,0.6);
     }
     #convo-head {
       flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
-      padding: 10px 16px; background: #252526; border-bottom: 1px solid #333;
+      padding: 10px 16px; background: var(--bg-6); border-bottom: 1px solid var(--line-5);
     }
-    #convo-head .t { font-weight: 600; color: #f0f0f0; }
-    #convo-head .sub { color: #777; font-size: 11px; }
+    #convo-head .t { font-weight: 600; color: var(--fg-2); }
+    #convo-head .sub { color: var(--fg-13); font-size: 11px; }
     #convo-head .spacer { flex: 1; }
     #convo-body { flex: 1; overflow-y: auto; padding: 12px 18px; }
     .cv-turn { margin-bottom: 12px; max-width: 860px; }
     .cv-role {
       font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
-      color: #888; margin-bottom: 3px; display: flex; gap: 8px; align-items: baseline;
+      color: var(--fg-12); margin-bottom: 3px; display: flex; gap: 8px; align-items: baseline;
     }
-    .cv-turn.user .cv-role { color: #4ec9b0; }
-    .cv-turn.assistant .cv-role { color: #9cdcfe; }
-    .cv-role .cv-ts { color: #666; text-transform: none; letter-spacing: 0; }
-    .cv-role .cv-model { color: #666; text-transform: none; letter-spacing: 0; }
+    .cv-turn.user .cv-role { color: var(--fg-teal); }
+    .cv-turn.assistant .cv-role { color: var(--fg-blue); }
+    .cv-role .cv-ts { color: var(--fg-14); text-transform: none; letter-spacing: 0; }
+    .cv-role .cv-model { color: var(--fg-14); text-transform: none; letter-spacing: 0; }
     .cv-text {
       white-space: pre-wrap; word-break: break-word; line-height: 1.55;
-      color: #d4d4d4; font-size: 13px;
-      background: #232324; border: 1px solid #2c2c2c; border-radius: 6px;
+      color: var(--fg-5); font-size: 13px;
+      background: var(--bg-4); border: 1px solid var(--line-3); border-radius: 6px;
       padding: 8px 12px;
     }
-    .cv-turn.user .cv-text { background: #1d2b26; border-color: #2d4a3e; }
+    .cv-turn.user .cv-text { background: var(--bg-teal); border-color: var(--line-teal); }
     /* Markdown 渲染版（助理訊息） */
     .cv-text.md { white-space: normal; }
     .cv-text.md p { margin: 0 0 8px; }
     .cv-text.md p:last-child { margin-bottom: 0; }
     .cv-text.md code {
-      background: #1a1a1a; border: 1px solid #333; border-radius: 3px;
-      padding: 0 5px; font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; color: #dcdcaa;
+      background: var(--bg-2); border: 1px solid var(--line-5); border-radius: 3px;
+      padding: 0 5px; font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; color: var(--fg-yellow-4);
     }
     .cv-text.md pre.md-code {
-      background: #161616; border: 1px solid #333; border-radius: 5px;
+      background: var(--bg-1); border: 1px solid var(--line-5); border-radius: 5px;
       padding: 10px 12px; margin: 8px 0; overflow-x: auto;
       font-family: 'Cascadia Code', Consolas, monospace; font-size: 12px; line-height: 1.5;
-      white-space: pre; color: #ce9178;
+      white-space: pre; color: var(--fg-orange-4);
     }
-    .cv-text.md .md-h { font-weight: 700; color: #f0f0f0; margin: 12px 0 6px; }
+    .cv-text.md .md-h { font-weight: 700; color: var(--fg-2); margin: 12px 0 6px; }
     .cv-text.md .md-h1 { font-size: 17px; } .cv-text.md .md-h2 { font-size: 15px; }
     .cv-text.md .md-h3 { font-size: 14px; } .cv-text.md .md-h4 { font-size: 13px; }
     .cv-text.md .md-list { margin: 6px 0 8px; padding-left: 22px; }
     .cv-text.md .md-list li { margin: 3px 0; }
     .cv-text.md .md-bq {
-      border-left: 3px solid #4ec9b0; background: #212826;
-      padding: 4px 10px; margin: 6px 0; color: #b8ccc6;
+      border-left: 3px solid var(--line-teal-3); background: var(--bg-5);
+      padding: 4px 10px; margin: 6px 0; color: var(--fg-teal-2);
     }
-    .cv-text.md hr.md-hr { border: 0; border-top: 1px solid #3a3a3a; margin: 10px 0; }
-    .cv-text.md strong { color: #f0f0f0; }
-    .cv-text.md a { color: #4ec9b0; }
+    .cv-text.md hr.md-hr { border: 0; border-top: 1px solid var(--line-6); margin: 10px 0; }
+    .cv-text.md strong { color: var(--fg-2); }
+    .cv-text.md a { color: var(--fg-teal); }
     /* Markdown 表格 */
     .cv-text.md .md-table {
       border-collapse: collapse; margin: 8px 0; font-size: 12px;
       display: block; max-width: 100%; overflow-x: auto;
     }
     .cv-text.md .md-table th, .cv-text.md .md-table td {
-      border: 1px solid #3a3a3a; padding: 5px 10px; text-align: left; vertical-align: top;
+      border: 1px solid var(--line-6); padding: 5px 10px; text-align: left; vertical-align: top;
     }
-    .cv-text.md .md-table th { background: #2a2a2a; color: #f0f0f0; font-weight: 600; }
-    .cv-text.md .md-table tbody tr:nth-child(even) td { background: #232324; }
+    .cv-text.md .md-table th { background: var(--bg-7); color: var(--fg-2); font-weight: 600; }
+    .cv-text.md .md-table tbody tr:nth-child(even) td { background: var(--bg-4); }
     /* 工具呼叫 chip */
     .cv-tools { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
     .cv-tool {
-      font-size: 11px; background: #2a2620; border: 1px solid #4a3f2d; color: #d8c39a;
+      font-size: 11px; background: var(--bg-orange); border: 1px solid var(--line-orange); color: var(--fg-orange-5);
       border-radius: 4px; padding: 2px 8px; display: inline-flex; gap: 6px; align-items: baseline;
       max-width: 100%; overflow: hidden;
     }
-    .cv-tool .cv-tool-hint { color: #8f8272; font-family: 'Cascadia Code', Consolas, monospace; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+    .cv-tool .cv-tool-hint { color: var(--fg-orange); font-family: 'Cascadia Code', Consolas, monospace; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
     /* 搜尋高亮 */
-    mark.cv-hit { background: #6b5a1d; color: #ffe89a; border-radius: 2px; padding: 0 1px; }
+    mark.cv-hit { background: var(--bg-yellow-5); color: var(--fg-yellow-5); border-radius: 2px; padding: 0 1px; }
     /* 標題列控制項 */
     #convo-search {
-      background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 4px; color: #d4d4d4;
+      background: var(--bg-2); border: 1px solid var(--line-6); border-radius: 4px; color: var(--fg-5);
       font-size: 12px; padding: 4px 10px; width: 180px; outline: none;
     }
-    #convo-search:focus { border-color: #4ec9b0; }
-    #convo-tools-toggle.on { background: #4a3f2d !important; color: #ffd97a; }
+    #convo-search:focus { border-color: var(--line-teal-3); }
+    #convo-tools-toggle.on { background: var(--bg-orange-3) !important; color: var(--fg-yellow-2); }
     #convo-tools-toggle.disabled { opacity: .4; pointer-events: none; }
-    #convo-reader-toggle.on { background: #2d3f4a !important; color: #9fd7ff; }
-    .cv-empty { color: #777; text-align: center; padding: 40px 20px; line-height: 1.8; }
-    #convo-btn.on { background: #2d5a4a; color: #cdebdf; }
+    #convo-reader-toggle.on { background: var(--bg-blue-2) !important; color: var(--fg-blue-2); }
+    .cv-empty { color: var(--fg-13); text-align: center; padding: 40px 20px; line-height: 1.8; }
+    #convo-btn.on { background: var(--bg-teal-2); color: var(--fg-teal-3); }
 
     #chat-side {
       flex: 0 0 var(--chat-w, 300px);
-      border-left: 1px solid #333;
-      background: #252526;
+      border-left: 1px solid var(--line-5);
+      background: var(--bg-6);
       display: flex;
       flex-direction: column;
       min-height: 0;
@@ -192,11 +194,11 @@
       position: absolute; left: -3px; top: 0; bottom: 0; width: 6px;
       cursor: col-resize; z-index: 10;
     }
-    #chat-resize:hover, #chat-resize.dragging { background: #4ec9b0; opacity: 0.6; }
+    #chat-resize:hover, #chat-resize.dragging { background: var(--bg-teal-3); opacity: 0.6; }
     #chat-head {
       padding: 8px 12px;
-      border-bottom: 1px solid #333;
-      color: #888;
+      border-bottom: 1px solid var(--line-5);
+      color: var(--fg-12);
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
@@ -204,40 +206,40 @@
       justify-content: space-between;
       align-items: center;
     }
-    #guest-count { color: #4ec9b0; }
-    #guest-list { padding: 4px 12px 8px; border-bottom: 1px solid #2a2a2a; display: flex; flex-wrap: wrap; gap: 6px; }
-    .guest-chip { background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 10px; padding: 1px 9px; font-size: 11px; color: #aaa; }
-    .guest-chip.online { color: #cdebdf; border-color: #2d5a4a; }
-    .guest-chip .dot { color: #4caf50; margin-right: 3px; }
-    .guest-chip.offline .dot { color: #666; }
+    #guest-count { color: var(--fg-teal); }
+    #guest-list { padding: 4px 12px 8px; border-bottom: 1px solid var(--line-3); display: flex; flex-wrap: wrap; gap: 6px; }
+    .guest-chip { background: var(--bg-7); border: 1px solid var(--line-6); border-radius: 10px; padding: 1px 9px; font-size: 11px; color: var(--fg-9); }
+    .guest-chip.online { color: var(--fg-teal-3); border-color: var(--line-teal-2); }
+    .guest-chip .dot { color: var(--fg-green); margin-right: 3px; }
+    .guest-chip.offline .dot { color: var(--fg-14); }
 
     #chat-msgs { flex: 1; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
     .msg { line-height: 1.45; word-break: break-word; }
     .msg .who { font-weight: 600; margin-right: 6px; }
-    .msg.host .who { color: #4ec9b0; }
-    .msg.guest .who { color: #9cdcfe; }
-    .msg.me .who { color: #dcdcaa; }
-    .msg .ts { color: #666; font-size: 10px; margin-left: 6px; }
-    .msg.system { color: #888; font-size: 11px; font-style: italic; }
+    .msg.host .who { color: var(--fg-teal); }
+    .msg.guest .who { color: var(--fg-blue); }
+    .msg.me .who { color: var(--fg-yellow-4); }
+    .msg .ts { color: var(--fg-14); font-size: 10px; margin-left: 6px; }
+    .msg.system { color: var(--fg-12); font-size: 11px; font-style: italic; }
     /* 貼圖 */
     .msg .chat-img {
       display: block; max-width: 100%; max-height: 200px; border-radius: 4px;
-      border: 1px solid #3a3a3a; margin-top: 4px; cursor: zoom-in;
+      border: 1px solid var(--line-6); margin-top: 4px; cursor: zoom-in;
     }
-    .msg .img-expired { color: #666; font-style: italic; font-size: 11px; }
+    .msg .img-expired { color: var(--fg-14); font-style: italic; font-size: 11px; }
     /* @mention */
-    .msg .mention { color: #4ec9b0; font-weight: 600; }
-    .msg .mention.me { background: #4a3d13; color: #ffd97a; border-radius: 3px; padding: 0 3px; }
-    .msg.mentioned { background: #2e2a1a; border-left: 2px solid #d7ba7d; padding-left: 6px; border-radius: 2px; }
+    .msg .mention { color: var(--fg-teal); font-weight: 600; }
+    .msg .mention.me { background: var(--bg-yellow-3); color: var(--fg-yellow-2); border-radius: 3px; padding: 0 3px; }
+    .msg.mentioned { background: var(--bg-yellow); border-left: 2px solid var(--line-yellow-2); padding-left: 6px; border-radius: 2px; }
     .mention-pop {
       position: absolute; bottom: 100%; left: 8px; right: 8px; margin-bottom: 4px;
-      background: #2d2d2d; border: 1px solid #444; border-radius: 4px;
+      background: var(--bg-9); border: 1px solid var(--line-7); border-radius: 4px;
       box-shadow: 0 -4px 14px rgba(0,0,0,0.4); z-index: 50;
       max-height: 150px; overflow-y: auto; display: none;
     }
     .mention-pop.visible { display: block; }
-    .mention-pop .mi { padding: 5px 10px; cursor: pointer; font-size: 12px; color: #ccc; }
-    .mention-pop .mi:hover, .mention-pop .mi.active { background: #094771; color: #fff; }
+    .mention-pop .mi { padding: 5px 10px; cursor: pointer; font-size: 12px; color: var(--fg-7); }
+    .mention-pop .mi:hover, .mention-pop .mi.active { background: var(--bg-blue-3); color: var(--fg-1); }
     /* 圖片 lightbox */
     #img-lightbox {
       position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 400;
@@ -246,7 +248,7 @@
     #img-lightbox.visible { display: flex; }
     #img-lightbox img { max-width: 92vw; max-height: 92vh; border-radius: 4px; }
 
-    #chat-input-row { flex: 0 0 auto; display: flex; gap: 6px; padding: 8px; border-top: 1px solid #333; position: relative; }
+    #chat-input-row { flex: 0 0 auto; display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--line-5); position: relative; }
     #chat-input-row .btn { flex: 0 0 auto; white-space: nowrap; }
     /* 🖼 貼圖鈕：SVG 圖示（emoji 太小難辨識），尺寸對齊 🎙 */
     #chat-img { display: inline-flex; align-items: center; justify-content: center; }
@@ -254,56 +256,56 @@
     #chat-input {
       flex: 1;
       min-width: 0;
-      background: #1e1e1e;
-      color: #d4d4d4;
-      border: 1px solid #444;
+      background: var(--bg-3);
+      color: var(--fg-5);
+      border: 1px solid var(--line-7);
       border-radius: 3px;
       padding: 6px 8px;
       font-size: 13px;
     }
     .btn {
-      background: #0e639c; color: #fff; border: 0; border-radius: 3px;
+      background: var(--bg-blue-4); color: #fff; border: 0; border-radius: 3px;
       padding: 6px 14px; font-size: 13px; cursor: pointer;
     }
-    .btn:hover { background: #1177bb; }
-    .btn:disabled { background: #2a2a2a; color: #555; cursor: not-allowed; }
+    .btn:hover { background: var(--bg-blue-5); }
+    .btn:disabled { background: var(--bg-7); color: var(--fg-15); cursor: not-allowed; }
 
     /* Join / closed overlay */
     #overlay {
-      position: fixed; inset: 0; background: #1e1e1e; z-index: 100;
+      position: fixed; inset: 0; background: var(--bg-3); z-index: 100;
       display: flex; align-items: center; justify-content: center;
     }
     #overlay.hidden { display: none; }
     .join-box {
-      background: #2d2d2d; border: 1px solid #444; border-radius: 6px;
+      background: var(--bg-9); border: 1px solid var(--line-7); border-radius: 6px;
       padding: 24px 26px; width: 360px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
     }
     .join-box h2 { font-size: 16px; margin-bottom: 4px; }
-    .join-box .sub { color: #888; font-size: 12px; margin-bottom: 14px; }
-    .join-box label { display: block; margin: 10px 0 4px; font-size: 12px; color: #aaa; }
+    .join-box .sub { color: var(--fg-12); font-size: 12px; margin-bottom: 14px; }
+    .join-box label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--fg-9); }
     .join-box input {
-      width: 100%; background: #1e1e1e; color: #d4d4d4;
-      border: 1px solid #444; border-radius: 3px; padding: 7px 9px; font-size: 13px;
+      width: 100%; background: var(--bg-3); color: var(--fg-5);
+      border: 1px solid var(--line-7); border-radius: 3px; padding: 7px 9px; font-size: 13px;
     }
-    .join-box .error { color: #f48771; font-size: 12px; margin-top: 10px; min-height: 15px; }
+    .join-box .error { color: var(--fg-red-3); font-size: 12px; margin-top: 10px; min-height: 15px; }
     .join-box .actions { margin-top: 14px; display: flex; justify-content: flex-end; }
-    .join-box .closed-note { color: #ffd97a; font-size: 13px; line-height: 1.6; }
+    .join-box .closed-note { color: var(--fg-yellow-2); font-size: 13px; line-height: 1.6; }
 
     /* toast */
     #toast-host { position: fixed; right: 16px; bottom: 16px; z-index: 300; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none; }
     .toast {
-      background: #2d2d2d; border: 1px solid #444; border-left: 3px solid #888;
-      border-radius: 4px; padding: 10px 14px; font-size: 12px; color: #ddd;
+      background: var(--bg-9); border: 1px solid var(--line-7); border-left: 3px solid var(--line-10);
+      border-radius: 4px; padding: 10px 14px; font-size: 12px; color: var(--fg-4);
       box-shadow: 0 6px 20px rgba(0,0,0,0.5); max-width: 420px;
       opacity: 1; transition: opacity 0.3s;
     }
-    .toast.warn { border-left-color: #d7913a; color: #ffd9a8; background: #2e2620; }
+    .toast.warn { border-left-color: var(--line-orange-3); color: var(--fg-orange-6); background: var(--bg-orange-2); }
     .toast.out { opacity: 0; }
 
     /* 窄螢幕：聊天欄疊到下方 */
     @media (max-width: 720px) {
       #layout { flex-direction: column; }
-      #chat-side { flex: 0 0 40%; border-left: 0; border-top: 1px solid #333; }
+      #chat-side { flex: 0 0 40%; border-left: 0; border-top: 1px solid var(--line-5); }
     }
   </style>
 </head>
@@ -312,16 +314,17 @@
     <span id="conn-dot"></span>
     <span class="room-name" id="room-name">—</span>
     <span class="session-name" id="session-name"></span>
-    <span class="perm-badge ro" id="role-badge" style="background:#333;color:#bbb">訪客</span>
+    <span class="perm-badge ro" id="role-badge" style="background:var(--bg-10);color:var(--fg-8)">訪客</span>
     <span class="perm-badge ro" id="perm-badge">唯讀</span>
     <span class="spacer"></span>
     <span class="me" id="me-nick"></span>
-    <button class="btn" id="master-freeze-btn" style="background:#3c3c3c; display:none" title="凍結／解除全房輸入（協作者暫為唯讀；房主不受影響）">🧊 凍結</button>
-    <button class="btn" id="master-close-btn" style="background:#5a2d2d; display:none" title="關閉整個聊天室（所有人被斷開；session 不受影響）">關房</button>
-    <button class="btn" id="term-voice-btn" style="background:#3c3c3c; display:none" title="🎙 按住說話，放開後把文字打進終端（不會自動按 Enter，確認後自己在終端按 Enter 送出）">🎙 對終端說</button>
-    <button class="btn" id="convo-btn" style="background:#3c3c3c" title="乾淨排版的完整對話記錄（讀對話存檔，不受終端重繪影響，獨立捲動）">📜 對話記錄</button>
-    <button class="btn" id="pause-btn" style="background:#3c3c3c" title="切到自己畫面：定格終端慢慢看，不被房主的輸出/捲動打擾；聊天不受影響">⏸ 看自己畫面</button>
-    <button class="btn" id="leave-btn" style="background:#3c3c3c" title="離開聊天室（清掉本機入場券）">離開</button>
+    <button class="btn" id="master-freeze-btn" style="background:var(--bg-11); display:none" title="凍結／解除全房輸入（協作者暫為唯讀；房主不受影響）">🧊 凍結</button>
+    <button class="btn" id="master-close-btn" style="background:var(--bg-red-4); display:none" title="關閉整個聊天室（所有人被斷開；session 不受影響）">關房</button>
+    <button class="btn" id="term-voice-btn" style="background:var(--bg-11); display:none" title="🎙 按住說話，放開後把文字打進終端（不會自動按 Enter，確認後自己在終端按 Enter 送出）">🎙 對終端說</button>
+    <button class="btn" id="theme-btn" style="background:var(--bg-11)">☀</button>
+    <button class="btn" id="convo-btn" style="background:var(--bg-11)" title="乾淨排版的完整對話記錄（讀對話存檔，不受終端重繪影響，獨立捲動）">📜 對話記錄</button>
+    <button class="btn" id="pause-btn" style="background:var(--bg-11)" title="切到自己畫面：定格終端慢慢看，不被房主的輸出/捲動打擾；聊天不受影響">⏸ 看自己畫面</button>
+    <button class="btn" id="leave-btn" style="background:var(--bg-11)" title="離開聊天室（清掉本機入場券）">離開</button>
   </div>
 
   <div id="layout">
@@ -336,8 +339,8 @@
       <div id="chat-msgs"></div>
       <div id="chat-input-row">
         <div class="mention-pop" id="mention-pop"></div>
-        <button class="btn" id="chat-img" style="background:#3c3c3c; padding:6px 10px" title="貼圖（也可直接在輸入框 Ctrl+V 貼上截圖）"><svg class="img-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8" fill="currentColor"/><path d="M21 16l-5-5-8 9"/></svg></button>
-        <button class="btn" id="chat-voice" style="background:#3c3c3c; padding:6px 10px" title="🎙 按住說話，放開後把文字加到輸入框（自己按 Enter 送出）">🎙</button>
+        <button class="btn" id="chat-img" style="background:var(--bg-11); padding:6px 10px" title="貼圖（也可直接在輸入框 Ctrl+V 貼上截圖）"><svg class="img-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8" fill="currentColor"/><path d="M21 16l-5-5-8 9"/></svg></button>
+        <button class="btn" id="chat-voice" style="background:var(--bg-11); padding:6px 10px" title="🎙 按住說話，放開後把文字加到輸入框（自己按 Enter 送出）">🎙</button>
         <input id="chat-input" type="text" placeholder="訊息… @ 可 tag 人" maxlength="2000" autocomplete="off" />
         <button class="btn" id="chat-send">送出</button>
         <input type="file" id="chat-file" accept="image/*" style="display:none" />
@@ -353,12 +356,12 @@
         <span class="sub" id="convo-status"></span>
         <span class="spacer"></span>
         <input id="convo-search" type="search" placeholder="🔍 搜尋…" autocomplete="off" />
-        <button class="btn" id="convo-reader-toggle" style="background:#3c3c3c; padding:4px 12px" title="簡潔模式：只顯示結論，隱藏過場與工具細節（適合非技術讀者）">📖 簡潔</button>
-        <button class="btn" id="convo-tools-toggle" style="background:#3c3c3c; padding:4px 12px" title="顯示 / 隱藏工具呼叫（Edit / Bash / Read…）">🔧 工具</button>
-        <button class="btn" id="convo-export-md" style="background:#3c3c3c; padding:4px 12px" title="下載為 Markdown">⬇ MD</button>
-        <button class="btn" id="convo-export-html" style="background:#3c3c3c; padding:4px 12px" title="下載為 HTML">⬇ HTML</button>
-        <button class="btn" id="convo-refresh" style="background:#3c3c3c; padding:4px 12px">刷新</button>
-        <button class="btn" id="convo-close" style="background:#3c3c3c; padding:4px 12px">× 關閉</button>
+        <button class="btn" id="convo-reader-toggle" style="background:var(--bg-11); padding:4px 12px" title="簡潔模式：只顯示結論，隱藏過場與工具細節（適合非技術讀者）">📖 簡潔</button>
+        <button class="btn" id="convo-tools-toggle" style="background:var(--bg-11); padding:4px 12px" title="顯示 / 隱藏工具呼叫（Edit / Bash / Read…）">🔧 工具</button>
+        <button class="btn" id="convo-export-md" style="background:var(--bg-11); padding:4px 12px" title="下載為 Markdown">⬇ MD</button>
+        <button class="btn" id="convo-export-html" style="background:var(--bg-11); padding:4px 12px" title="下載為 HTML">⬇ HTML</button>
+        <button class="btn" id="convo-refresh" style="background:var(--bg-11); padding:4px 12px">刷新</button>
+        <button class="btn" id="convo-close" style="background:var(--bg-11); padding:4px 12px">× 關閉</button>
       </div>
       <div id="convo-body"></div>
     </div>

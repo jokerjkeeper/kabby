@@ -2,41 +2,43 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8" />
+  <link rel="stylesheet" href="/theme.css" />
+  <script src="/theme.js"></script>
   <title>kabby embed</title>
   <link rel="stylesheet" href="https://unpkg.com/@xterm/xterm@5.5.0/css/xterm.css" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; overflow: hidden; }
     body {
-      background: #1e1e1e;
-      color: #d4d4d4;
+      background: var(--bg-3);
+      color: var(--fg-5);
       font-family: 'Segoe UI', system-ui, sans-serif;
       font-size: 12px;
       display: flex;
       flex-direction: column;
     }
     #bar {
-      background: #2d2d2d;
+      background: var(--bg-9);
       padding: 4px 10px;
       display: flex;
       align-items: center;
       gap: 8px;
-      border-bottom: 1px solid #333;
+      border-bottom: 1px solid var(--line-5);
       flex: 0 0 auto;
     }
-    #bar .dot { width: 8px; height: 8px; border-radius: 50%; background: #888; }
-    #bar .dot.connected { background: #4caf50; }
-    #bar .dot.disconnected { background: #f44336; }
-    #bar .info { color: #aaa; }
-    #bar .info b { color: #f0f0f0; }
-    #term { flex: 1; padding: 4px; min-height: 0; }
-    #error { padding: 14px; color: #f48771; }
+    #bar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bg-17); }
+    #bar .dot.connected { background: var(--bg-green-3); }
+    #bar .dot.disconnected { background: var(--bg-red-6); }
+    #bar .info { color: var(--fg-9); }
+    #bar .info b { color: var(--fg-2); }
+    #term { flex: 1; padding: 4px; min-height: 0; background: var(--term-bg); }
+    #error { padding: 14px; color: var(--fg-red-3); }
     /* 細線暗色捲軸（取代 xterm viewport 的預設粗捲軸） */
-    #term, .xterm-viewport { scrollbar-width: thin; scrollbar-color: #4a4a4a transparent; }
+    #term, .xterm-viewport { scrollbar-width: thin; scrollbar-color: var(--line-8) transparent; }
     #term::-webkit-scrollbar, .xterm-viewport::-webkit-scrollbar { width: 6px; height: 6px; }
     #term::-webkit-scrollbar-track, .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
-    #term::-webkit-scrollbar-thumb, .xterm-viewport::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 4px; }
-    #term::-webkit-scrollbar-thumb:hover, .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #6a6a6a; }
+    #term::-webkit-scrollbar-thumb, .xterm-viewport::-webkit-scrollbar-thumb { background: var(--bg-13); border-radius: 4px; }
+    #term::-webkit-scrollbar-thumb:hover, .xterm-viewport::-webkit-scrollbar-thumb:hover { background: var(--bg-16); }
     #error.hidden { display: none; }
   </style>
 </head>

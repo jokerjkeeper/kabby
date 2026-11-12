@@ -544,7 +544,7 @@
       const roleTag = g.role && g.role !== 'guest'
         ? `<span style="opacity:.55;font-size:9px"> ${ROLE_LABEL[g.role] || g.role}</span>` : '';
       const kick = (role === 'master' && g.ticket && g.ticket !== myTicket)
-        ? `<button data-kick="${escapeHtml(g.ticket)}" title="移出此人" style="margin-left:4px;border:0;background:transparent;color:#e06c6c;cursor:pointer;font-size:12px;line-height:1">×</button>` : '';
+        ? `<button data-kick="${escapeHtml(g.ticket)}" title="移出此人" style="margin-left:4px;border:0;background:transparent;color:var(--fg-red);cursor:pointer;font-size:12px;line-height:1">×</button>` : '';
       return `<span class="guest-chip ${g.online ? 'online' : 'offline'}"><span class="dot">●</span>${escapeHtml(g.nickname)}${roleTag}${kick}</span>`;
     }).join('');
     if (role === 'master') {

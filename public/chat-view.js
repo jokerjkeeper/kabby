@@ -239,7 +239,7 @@
           applyResponse(r);
         }
       } catch (err) {
-        setNote('<span style="color:#e06c6c">讀取失敗：' + esc(err.message || err) + '</span>');
+        setNote('<span style="color:var(--fg-red)">讀取失敗：' + esc(err.message || err) + '</span>');
       } finally {
         inflight = false;
         if (!disposed) updateBanner();

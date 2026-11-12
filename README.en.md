@@ -86,6 +86,7 @@ User data lives in `~/.kabby/`: `profiles.json` (project list), `sensitive-words
 - **Tabs and split panes**: `Ctrl+Shift+←/→` to switch tabs, `Ctrl+Shift+D/E` to split horizontally/vertically; each pane is its own session
 - **Providers**: launch either Claude Code or Codex, chosen when the session is created
 - **Input blocklist**: outgoing input is matched against a word list server-side; a hit is dropped before it reaches the PTY
+- **Dark / light theme**: toggle with ☀ / 🌙 at the top right; shared by every page (main, chat room, file transfer, embed) and remembered in the browser, following the system setting until you pick one. The terminal itself stays dark. Iframe embeds can force it with `?theme=light`
 
 ### Chat view (terminal | chat toggle)
 

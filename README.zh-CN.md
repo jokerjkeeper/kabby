@@ -86,6 +86,7 @@ npm run dist        # 打包成 Windows portable exe
 - **多标签页 + 分割 pane**：`Ctrl+Shift+←/→` 切标签页、`Ctrl+Shift+D/E` 左右/上下分割，每个 pane 是一个独立会话
 - **Provider**：Claude Code 与 Codex 都能开，建会话时选
 - **敏感词拦截**：发送的输入在服务端比对词库，命中直接拦下，不进 PTY
+- **暗色 / 亮色主题**：右上角 ☀ / 🌙 切换，所有页面（主页、聊天室、文件传输、embed）共用，选择记在浏览器；没选过时跟随系统设置。终端本身保持暗色。iframe 嵌入可用 `?theme=light` 指定
 
 ### 对话视图（终端｜对话 互切）
 
