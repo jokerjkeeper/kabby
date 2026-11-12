@@ -80,7 +80,8 @@ Request body：
 |---|---|---|---|---|
 | `name` | string | ✓ | — | 使用者取的識別名，可當 :id 用 |
 | `cwd` | string | | `process.cwd()` | PTY 啟動的工作目錄 |
-| `cmd` | string | | `claude.exe`（Win）/ `claude`（Unix） | 要 spawn 的執行檔 |
+| `cmd` | string | | 自動尋找（`.env` 的 `KABBY_CLAUDE_CMD` → PATH 上的 `claude.exe` / `claude.cmd` → `~/.local/bin` → `%APPDATA%
+pm`） | 要 spawn 的執行檔；只填 `claude` 也會自動補 `.exe` / `.cmd` |
 | `args` | string[] | | `["--dangerously-skip-permissions"]` | 傳給 `cmd` 的參數 |
 | `cols` | number | | `220` | 初始 PTY 寬度 |
 | `rows` | number | | `50` | 初始 PTY 高度 |

@@ -67,6 +67,8 @@ Environment variables (put them in `.env`; see `.env.example`):
 | `HOST` | `127.0.0.1` | Bind address; set `0.0.0.0` to allow LAN access (always pair it with `AUTH_TOKEN`) |
 | `AUTH_TOKEN` | (unset) | Once set, WS connections must pass `?token=<value>` |
 | `KABBY_VIEWER_PATH` | (unset) | Absolute path to the cc history viewer executable; enables the "viewer" button in the UI |
+| `KABBY_CLAUDE_CMD` / `KABBY_CODEX_CMD` | (unset = auto-detect) | Full path of the claude / codex executable. When unset, kabby searches PATH for `claude.exe` / `claude.cmd`, then `~/.local/bin` and `%APPDATA%
+pm`; only needed when the daemon's PATH differs from your terminal |
 | `KABBY_STT_URL` | `http://127.0.0.1:17493` | STT service (Voicebox / Whisper) used by 🎙 voice input; the daemon proxies requests to it |
 | `KABBY_STT_TIMEOUT_MS` | `60000` | Timeout for a single transcription, in milliseconds |
 | `KABBY_FILES_ROOTS` | (unset) | Multiple shared roots for `/api/files`: `name=absolute-path` separated by `;` (e.g. `repo=D:\work\project;models=D:\shared\models`); the first path segment selects the root. Takes precedence over `KABBY_FILES_ROOT` |
@@ -179,6 +181,7 @@ Runs `cmd.exe` in place of cc (so it does not depend on claude being installed) 
 
 ```bash
 node test/cc-chat-items.js
+node test/providers-cmd.js
 ```
 
 Chat-view parsing of the jsonl into items (no daemon needed): tool calls paired with results, meta / slash-command output filtered, long content truncated, incremental reads (partial lines kept for later, rewritten files re-parsed).

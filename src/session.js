@@ -53,7 +53,8 @@ class Session extends EventEmitter {
     this._inputMatcher = null;
     this._inputMatcherAt = 0;
 
-    const spawnCmd = cmd || providers.defaultCmd(this.provider);
+    // 執行檔：使用者填的盡量解析成完整路徑；沒填就依 .env → PATH → 常見安裝位置找（claude.exe / claude.cmd 都認）
+    const spawnCmd = providers.resolveCmd(this.provider, cmd);
     const spawnArgs = Array.isArray(args) ? args : providers.defaultArgs(this.provider);
 
     // 若 args 含 provider 的 resume 參數，記下這個歷史 session id 供佔用偵測用
@@ -71,7 +72,7 @@ class Session extends EventEmitter {
       const raw = err && err.message ? err.message : String(err);
       throw new Error(
         `無法啟動 "${spawnCmd}"：${raw}。` +
-        ` 請確認執行檔存在於 PATH，或在「執行檔」欄填完整路徑（args 應在「啟動參數」欄）。`
+        ` ${providers.cmdNotFoundHint(this.provider)}（args 應在「啟動參數」欄）`
       );
     }
 

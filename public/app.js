@@ -71,7 +71,7 @@
   }
   const PROVIDER_UI = {
     claude: {
-      cmdPlaceholder: '預設：claude.cmd（Win）/ claude（Unix）',
+      cmdPlaceholder: '預設：自動尋找 claude（PATH → ~/.local/bin → npm）',
       cmdHint: '想跑別的 shell（如 cmd.exe / bash）才填。',
       argsPlaceholder: '預設：--dangerously-skip-permissions',
       argsHint: 'Space-separated args. Leave empty to use the provider default; enter a single space to force no args.',
@@ -79,7 +79,7 @@
       defaultArgsText: '--dangerously-skip-permissions',
     },
     codex: {
-      cmdPlaceholder: '預設：codex.cmd（Win）/ codex（Unix）',
+      cmdPlaceholder: '預設：自動尋找 codex（PATH → ~/.local/bin → npm）',
       cmdHint: '通常留空即可；只有要覆蓋成別的執行檔才填。',
       argsPlaceholder: '預設：--dangerously-bypass-approvals-and-sandbox',
       argsHint: '0.142+ 已無 --full-auto。bypass = 全自動免確認（對齊 claude yolo）；resume 時此旗標會自動略過（resume 子命令不收）。',

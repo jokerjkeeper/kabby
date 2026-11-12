@@ -6,7 +6,8 @@
 
 - Node.js ≥ 18
 - Windows / macOS / Linux 皆可（cc 進程的可用性看 OS）
-- 想跑真正的 cc：本機要能在 PATH 找到 `claude`（Unix）/ `claude.cmd`（Windows，npm 裝的 shim，不是 `.exe`）
+- 想跑真正的 cc：daemon 會依 PATH 找 `claude.exe`（官方安裝程式）或 `claude.cmd`（npm 安裝），找不到再看 `~/.local/bin`、`%APPDATA%
+pm`；裝在其他地方且不在 daemon 的 PATH 時，在 `.env` 設 `KABBY_CLAUDE_CMD=<完整路徑>`
 
 ## 1. 啟動 daemon
 

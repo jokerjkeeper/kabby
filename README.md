@@ -67,6 +67,8 @@ npm run dist        # 打包成 Windows portable exe
 | `HOST` | `127.0.0.1` | 監聽位址；設 `0.0.0.0` 開放區網直連（務必搭配 `AUTH_TOKEN`） |
 | `AUTH_TOKEN` | （未設） | 設了之後 WS 連線必須帶 `?token=<value>` |
 | `KABBY_VIEWER_PATH` | （未設） | cc history viewer 的 portable exe 絕對路徑；設了 UI 上「viewer」按鈕才會啟用 |
+| `KABBY_CLAUDE_CMD` / `KABBY_CODEX_CMD` | （未設 = 自動尋找） | 啟動 claude / codex 的執行檔完整路徑。未設時依 PATH 找 `claude.exe` / `claude.cmd`，再找 `~/.local/bin`、`%APPDATA%
+pm`；daemon 的 PATH 跟終端不同時才需要設 |
 | `KABBY_STT_URL` | `http://127.0.0.1:17493` | 🎙 語音輸入用的 STT 服務（Voicebox / Whisper）位址，daemon 代理轉發 |
 | `KABBY_STT_TIMEOUT_MS` | `60000` | 單次語音轉寫的逾時（毫秒） |
 | `KABBY_FILES_ROOTS` | （未設） | `/api/files` 多個分享根目錄，`名稱=絕對路徑` 以分號分隔（例 `repo=D:\work\project;models=D:\shared\models`），路徑第一段為名稱；有設時優先於 `KABBY_FILES_ROOT` |
@@ -179,6 +181,7 @@ node test/smoke.js
 
 ```bash
 node test/cc-chat-items.js
+node test/providers-cmd.js
 ```
 
 對話視圖的 jsonl → items 解析（不需 daemon）：工具呼叫與結果配對、meta / slash 指令輸出濾除、長內容截斷、增量讀檔（半行不誤吞、檔案重寫重解析）。
