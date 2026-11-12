@@ -71,7 +71,7 @@ npm run dist        # 打包成 Windows portable exe
 | `KABBY_STT_TIMEOUT_MS` | `60000` | 單次語音轉寫的逾時（毫秒） |
 | `KABBY_FILES_ROOTS` | （未設） | `/api/files` 多個分享根目錄，`名稱=絕對路徑` 以分號分隔（例 `repo=D:\work\project;models=D:\shared\models`），路徑第一段為名稱；有設時優先於 `KABBY_FILES_ROOT` |
 | `KABBY_FILES_ROOT` | （未設 = 關閉） | 唯讀檔案下載服務 `/api/files` 的分享根目錄（絕對路徑），見 [docs/api.md](docs/api.md#唯讀檔案下載apifiles) |
-| `KABBY_FILES_ALLOW_IPS` | （空 = 不限） | `/api/files` 的來源 IP 白名單，逗號分隔（例 `192.168.1.20`） |
+| `KABBY_FILES_ALLOW_IPS` | （空 = 不限） | `/api/files` 的來源 IP 白名單，逗號分隔；可寫單一 IP、`192.168.1.*` 或 CIDR `192.168.1.0/24` |
 | `KABBY_FILES_LOG_DIR` | `~/.kabby/logs/files` | `/api/files` 稽核日誌目錄（JSONL 每日一檔，含被拒請求，不記 token）；即時監控見主頁側欄「📦」 |
 | `KABBY_FILES_LOG_DAYS` | `30` | 稽核日誌保留天數 |
 

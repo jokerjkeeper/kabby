@@ -330,7 +330,7 @@ curl -H "X-Kabby-Token: $AUTH_TOKEN" -F file=@hello.wav -F language=zh http://lo
 |---|---|
 | `KABBY_FILES_ROOTS` | 多個分享根目錄，`名稱=絕對路徑` 以分號分隔（例 `repo=D:\work\project;models=D:\shared\models`），每項以第一個 `=` 切開。名稱限 `[a-z0-9_-]+`、不可重複；路徑必須是已存在的目錄。**不合規 → 啟動時印錯誤並停用 `/api/files`**（daemon 照常啟動） |
 | `KABBY_FILES_ROOT` | 舊的單一根目錄（絕對路徑，例 `D:\shared\models`），路徑不帶名稱前綴。與 `KABBY_FILES_ROOTS` 同時設時以 ROOTS 為準並印警告 |
-| `KABBY_FILES_ALLOW_IPS` | 來源 IP 白名單，逗號分隔（例 `192.168.1.20`）；空 = 不限。`::ffff:192.168.1.20` 這類 IPv4-mapped IPv6 會自動比對成 IPv4 |
+| `KABBY_FILES_ALLOW_IPS` | 來源 IP 白名單，逗號分隔；空 = 不限。每項可寫單一 IP（`192.168.1.20`）、結尾萬用字元（`192.168.1.*` = 該 /24、`192.168.*.*` = /16）或 CIDR（`192.168.1.0/24`），可混寫。`*` 只能放在結尾的整段（`10.*.1.5`、`10.1.1.1*`、單獨 `*` 都不合法）。不合法項目啟動時警告並略過；**全部不合法時一律拒絕**（寫錯不會變成不限）。`::ffff:192.168.1.20` 這類 IPv4-mapped IPv6 會自動比對成 IPv4；IPv6 只支援完整位址比對 |
 
 兩個都沒設 = 功能關閉，`/api/files/*` 一律 `404`。daemon 要讓別台機器連得到，需 `HOST=0.0.0.0` 並設 `AUTH_TOKEN`。
 
@@ -349,7 +349,7 @@ curl -H "X-Kabby-Token: $AUTH_TOKEN" -F file=@hello.wav -F language=zh http://lo
 
 1. **token**：沿用 `AUTH_TOKEN`（掛在 token middleware 之後），失敗 `401`。**請用 `X-Kabby-Token` header**；`?token=` 雖然可用，但會出現在存取日誌與代理 log 裡，下載端不要用。
 2. **拒絕經 tunnel / 代理轉入的請求**：只要 header 帶 `cf-connecting-ip` 或 `x-forwarded-for`，一律 `403`，不管來源 IP 與 token。原因：cloudflared / 反向代理轉進來的連線，socket 位址是 `127.0.0.1`；這條確保即使白名單含 `127.0.0.1`，外部請求也進不來。
-3. **IP 白名單**：看 TCP socket 的來源位址（不信任任何 header），不在名單內 `403`。建議只填下載端機器，本機自測時再暫時加 `127.0.0.1`。
+3. **IP 白名單**：看 TCP socket 的來源位址（不信任任何 header），不在名單內 `403`。建議只填下載端機器，本機自測時再暫時加 `127.0.0.1`。用萬用字元或 CIDR 開整個網段時，留意同網段裡是否有不該能下載的機器。
 4. **路徑檢查**：`path` 一律是相對於根目錄的路徑（`/` 或 `\` 分隔皆可，回應一律 `/`）。
    - 絕對路徑、磁碟代號、UNC、含 `:`（Windows ADS）、空字元、任何 `..` 段 → `400 { "error": "invalid path" }`
    - `realpath` 後不在根目錄底下（symlink / junction 逃逸）→ `400`

@@ -9,7 +9,7 @@
  * 分享根目錄：KABBY_FILES_ROOTS（多根，路徑第一段是名稱）或舊的 KABBY_FILES_ROOT（單根）。
  * 掛在 daemon 的 token middleware 之後，沿用 AUTH_TOKEN。本模組再加三道關：
  *   1. 帶 cf-connecting-ip / x-forwarded-for 的請求（經 tunnel / 代理轉入）一律 403
- *   2. KABBY_FILES_ALLOW_IPS 白名單（看 socket 位址，不信任 header）
+ *   2. KABBY_FILES_ALLOW_IPS 白名單（看 socket 位址，不信任 header；支援單一 IP、10.1.129.*、CIDR）
  *   3. 路徑檢查：拒絕絕對路徑 / .. / ADS / UNC / 空字元，realpath 後必須仍在 root 底下
  * 點開頭的檔案或目錄一律不提供（list 不列、stat / raw 回 404）。
  */
@@ -54,9 +54,81 @@ function normalizeIp(ip) {
   return ip.startsWith('::ffff:') ? ip.slice(7) : ip;
 }
 
-/** 解析逗號分隔的白名單字串 → Set（空 = 不限） */
+/** IPv4 字串 → 32-bit 無號整數；不是合法 IPv4 回 null */
+function ipv4ToInt(s) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+  if (!m) return null;
+  const parts = m.slice(1).map(Number);
+  if (parts.some((n) => n > 255)) return null;
+  return ((parts[0] * 256 + parts[1]) * 256 + parts[2]) * 256 + parts[3];
+}
+
+/** 前綴長度 → 遮罩（/0 = 0、/32 = 全 1） */
+function prefixMask(bits) {
+  return bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+}
+
+/** 網段規則：base 已套遮罩 */
+function v4Rule(text, ipInt, bits) {
+  const mask = prefixMask(bits);
+  return { text, kind: 'v4', base: (ipInt & mask) >>> 0, mask };
+}
+
+/**
+ * 解析白名單的一筆。支援：
+ *   10.1.129.20     單一 IPv4（::ffff: 前綴會去掉）
+ *   10.1.129.*      萬用字元，只能放在結尾的整段（10.1.*.* 可、10.*.1.5 / 10.1.129.1* 不可）
+ *   10.1.129.0/24   CIDR（/0 ~ /32）
+ *   ::1             IPv6 只做完整字串比對
+ * 不合法回 null。
+ */
+function parseAllowRule(entry) {
+  const s = normalizeIp(entry);
+  if (s.includes('*')) {
+    const parts = s.split('.');
+    const first = parts.indexOf('*');
+    if (parts.length !== 4 || first < 1) return null;   // 單獨 * 或 *.x.x.x 不收（不限請留空）
+    if (parts.slice(first).some((p) => p !== '*')) return null;
+    const ipInt = ipv4ToInt(parts.map((p) => (p === '*' ? '0' : p)).join('.'));
+    return ipInt === null ? null : v4Rule(s, ipInt, first * 8);
+  }
+  if (s.includes('/')) {
+    const [ip, len, extra] = s.split('/');
+    const ipInt = ipv4ToInt(ip);
+    if (extra !== undefined || ipInt === null || !/^\d{1,2}$/.test(len) || Number(len) > 32) return null;
+    return v4Rule(s, ipInt, Number(len));
+  }
+  const ipInt = ipv4ToInt(s);
+  if (ipInt !== null) return v4Rule(s, ipInt, 32);
+  if (/^[0-9a-f:]+$/i.test(s) && s.includes(':')) return { text: s, kind: 'exact', ip: s.toLowerCase() };
+  return null;
+}
+
+/**
+ * 解析逗號分隔的白名單字串。
+ * 回傳 { configured, rules, invalid }：configured = 有填任何東西（空 = 不限）。
+ * 有填但全部不合法時 rules 為空 → ipAllowed 一律拒絕（寫錯不能變成全開）。
+ */
 function parseAllowIps(value) {
-  return new Set(String(value || '').split(',').map((s) => normalizeIp(s.trim())).filter(Boolean));
+  const entries = String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const rules = [];
+  const invalid = [];
+  for (const entry of entries) {
+    const rule = parseAllowRule(entry);
+    if (rule) rules.push(rule);
+    else invalid.push(entry);
+  }
+  return { configured: entries.length > 0, rules, invalid };
+}
+
+/** 來源 IP 是否在白名單內（未設定 = 全部放行） */
+function ipAllowed(allow, ip) {
+  if (!allow.configured) return true;
+  const addr = normalizeIp(ip || '');
+  const ipInt = ipv4ToInt(addr);
+  return allow.rules.some((r) => (r.kind === 'v4'
+    ? ipInt !== null && ((ipInt & r.mask) >>> 0) === r.base
+    : r.ip === addr.toLowerCase()));
 }
 
 /** Windows 檔案系統不分大小寫，比對路徑時統一轉小寫 */
@@ -154,7 +226,7 @@ function parseFilesConfig({ root, roots } = {}) {
  * @param {string|null} [opts.root]     舊的單一分享根目錄（KABBY_FILES_ROOT）
  * @param {string|null} [opts.roots]    多根目錄（KABBY_FILES_ROOTS，`名稱=路徑;…`），有設以它為準
  * @param {object} [opts.config]        已解析好的 parseFilesConfig() 結果（給了就不再解析 root / roots）
- * @param {string} [opts.allowIps]      逗號分隔 IP 白名單（空 = 不限）
+ * @param {string} [opts.allowIps]      逗號分隔 IP 白名單：單一 IP、10.1.129.*、10.1.129.0/24（空 = 不限）
  * @param {(line:string)=>void} [opts.log]  stderr 存取日誌輸出（預設 stderr）
  * @param {object} [opts.audit]         createFilesAudit() 實例（JSONL 稽核 + 即時狀態）；省略 = 只記記憶體
  * 設定為 off（未設或不合規）時全部回 404（/activity 回 { enabled:false }）。
@@ -175,7 +247,11 @@ function createFilesRouter({ root, roots, config, allowIps = '', log = (line) =>
 
   const multi = cfg.mode === 'multi';
   const rootByName = new Map(cfg.roots.map((r) => [r.name, r]));
-  const allowSet = parseAllowIps(allowIps);
+  const allow = parseAllowIps(allowIps);
+  for (const bad of allow.invalid) log(`[files] 警告：KABBY_FILES_ALLOW_IPS 忽略不合法的項目「${bad}」`);
+  if (allow.configured && !allow.rules.length) {
+    log('[files] 錯誤：KABBY_FILES_ALLOW_IPS 沒有任何合法項目 — /api/files 一律拒絕（不限來源請留空）');
+  }
   const hashCache = new Map();    // key → sha256 hex
   const hashInflight = new Map(); // key → Promise<sha256 hex>
 
@@ -308,7 +384,7 @@ function createFilesRouter({ root, roots, config, allowIps = '', log = (line) =>
       config: {
         mode: cfg.mode,
         roots: cfg.roots.map((r) => r.name),
-        allowIps: [...allowSet],
+        allowIps: allow.rules.map((r) => r.text),
       },
     });
   });
@@ -345,7 +421,7 @@ function createFilesRouter({ root, roots, config, allowIps = '', log = (line) =>
       res.locals.files.reason = 'proxy_header';
       return res.status(403).json({ error: 'forbidden' });
     }
-    if (allowSet.size && !allowSet.has(normalizeIp(req.socket.remoteAddress))) {
+    if (!ipAllowed(allow, req.socket.remoteAddress)) {
       res.locals.files.reason = 'ip_not_allowed';
       return res.status(403).json({ error: 'forbidden' });
     }
@@ -468,4 +544,4 @@ function createFilesRouter({ root, roots, config, allowIps = '', log = (line) =>
   return router;
 }
 
-module.exports = { createFilesRouter, parseFilesConfig, normalizeIp, splitUserPath, isInside };
+module.exports = { createFilesRouter, parseFilesConfig, normalizeIp, splitUserPath, isInside, parseAllowIps, ipAllowed };
